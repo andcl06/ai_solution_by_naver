@@ -13,7 +13,6 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
     response_schema: JSON 응답을 위한 스키마 (선택 사항)
     """
     if not api_key:
-        st.error("🚨 오류: Potens.dev API 키가 누락되었습니다.")
         return {"error": "Potens.dev API 키가 누락되었습니다."}
 
     potens_api_endpoint = "https://ai.potens.ai/api/chat"
@@ -36,7 +35,6 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
         response_json = response.json()
 
         if "message" in response_json:
-            # response_schema가 있을 경우, message 필드의 내용을 JSON으로 파싱 시도
             if response_schema:
                 try:
                     parsed_content = json.loads(response_json["message"].strip())
@@ -58,6 +56,25 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
     except Exception as e:
         return {"error": f"알 수 없는 오류 발생: {e}"}
 
+def retry_ai_call(prompt: str, api_key: str, response_schema=None, max_retries: int = 2, delay_seconds: int = 15) -> dict:
+    """
+    Potens.dev API 호출에 대한 재시도 로직을 포함한 래퍼 함수.
+    call_potens_api_raw를 호출하고 실패 시 재시도합니다.
+    """
+    for attempt in range(max_retries):
+        response_dict = call_potens_api_raw(prompt, api_key=api_key, response_schema=response_schema)
+
+        if "error" not in response_dict:
+            return response_dict
+        else:
+            error_msg = response_dict.get("error", "알 수 없는 오류")
+            if attempt < max_retries - 1:
+                time.sleep(delay_seconds)
+            else:
+                return {"error": f"AI 호출 최종 실패: {error_msg}"}
+    return {"error": "AI 응답을 가져오는 데 최종 실패했습니다. 나중에 다시 시도해주세요."}
+
+
 def get_article_summary(title: str, link: str, date_str: str, summary_snippet: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
     """
     Potens.dev AI를 호출하여 제공된 제목, 링크, 날짜, 미리보기 요약을 바탕으로
@@ -74,18 +91,12 @@ def get_article_summary(title: str, link: str, date_str: str, summary_snippet: s
         f"미리보기 요약: {summary_snippet}"
     )
 
-    for attempt in range(max_attempts):
-        response_dict = call_potens_api_raw(initial_prompt, api_key=api_key)
-        if "text" in response_dict:
-            return response_dict["text"]
-        else:
-            error_msg = response_dict.get("error", "알 수 없는 오류")
-            if attempt < max_attempts - 1:
-                time.sleep(delay_seconds)
-            else:
-                return f"Potens.dev AI 호출 최종 실패: {error_msg}"
+    response_dict = retry_ai_call(initial_prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
+    if "text" in response_dict:
+        return response_dict["text"]
+    else:
+        return response_dict.get("error", "알 수 없는 오류")
 
-    return "Potens.dev AI 호출에서 유효한 응답을 받지 못했습니다."
 
 def get_relevant_keywords(trending_keywords_data: list[dict], perspective: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> list[str]:
     """
@@ -106,17 +117,114 @@ def get_relevant_keywords(trending_keywords_data: list[dict], perspective: str, 
         "items": {"type": "STRING"}
     }
 
-    for attempt in range(max_attempts):
-        response_dict = call_potens_api_raw(prompt, api_key, response_schema=response_schema)
-        if "text" in response_dict and isinstance(response_dict["text"], list):
-            return response_dict["text"]
+    response_dict = retry_ai_call(prompt, api_key=api_key, response_schema=response_schema, max_retries=max_attempts, delay_seconds=delay_seconds)
+    if "text" in response_dict and isinstance(response_dict["text"], list):
+        return response_dict["text"]
+    else:
+        return [] # 오류 발생 시 빈 리스트 반환
+
+def summarize_long_combined_text(combined_text: str, api_key: str, 
+                                 max_length_for_direct_call: int = 1500, # 직접 호출 최대 길이 (조정 가능)
+                                 chunk_size: int = 500, # 청크 크기 (조정 가능)
+                                 delay_between_chunks: int = 10, # 청크 요약 간 지연 (조정 가능)
+                                 max_attempts: int = 2) -> str:
+    """
+    긴 텍스트를 받아, AI가 처리하기 쉬운 길이로 중간 요약합니다.
+    텍스트가 max_length_for_direct_call보다 길면 청크로 나누어 요약하고 합칩니다.
+    """
+    if not combined_text:
+        return ""
+
+    if len(combined_text) <= max_length_for_direct_call:
+        # 길이가 충분히 짧으면 직접 요약 요청
+        prompt = f"다음 텍스트를 간결하게 요약해 주세요.\n\n텍스트: {combined_text}"
+        response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_between_chunks)
+        if "text" in response_dict:
+            return clean_ai_response_text(response_dict["text"])
         else:
-            error_msg = response_dict.get("error", "알 수 없는 오류")
-            if attempt < max_attempts - 1:
-                time.sleep(delay_seconds)
-            else:
-                return []
-    return []
+            return f"긴 텍스트 직접 요약 실패: {response_dict.get('error', '알 수 없는 오류')}"
+
+    # 텍스트가 너무 길면 청크로 나누어 요약
+    chunks = [combined_text[i:i + chunk_size] for i in range(0, len(combined_text), chunk_size)]
+    
+    summarized_chunks = []
+    for i, chunk in enumerate(chunks):
+        prompt = f"다음 텍스트를 간결하게 요약해 주세요.\n\n텍스트: {chunk}"
+        response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_between_chunks)
+        
+        if "text" in response_dict:
+            summarized_chunks.append(clean_ai_response_text(response_dict["text"]))
+        else:
+            # 청크 요약 실패 시 해당 청크는 빈 문자열로 처리하거나 오류 메시지를 포함
+            summarized_chunks.append(f"[청크 {i+1} 요약 실패: {response_dict.get('error', '알 수 없는 오류')}]")
+        
+        if i < len(chunks) - 1: # 마지막 청크가 아니면 잠시 대기
+            time.sleep(delay_between_chunks)
+            
+    return " ".join(summarized_chunks)
+
+
+def get_overall_trend_summary(summarized_articles: list[dict], api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
+    """
+    AI가 요약된 기사들을 바탕으로 전반적인 뉴스 트렌드를 요약합니다.
+    이때, 입력 텍스트가 길 경우 중간 요약 과정을 거칩니다.
+    """
+    if not summarized_articles:
+        return "요약된 기사가 없어 뉴스 트렌드를 요약할 수 없습니다."
+
+    # 요약된 기사 내용을 하나의 긴 텍스트로 결합
+    combined_summaries = "\n\n---\n\n".join([
+        f"제목: {art['제목']}\n날짜: {art['날짜']}\n요약: {art['내용']}"
+        for art in summarized_articles
+    ])
+
+    # 결합된 요약문이 길 경우, 중간 요약 과정을 거침
+    processed_content_for_ai = summarize_long_combined_text(
+        combined_summaries, 
+        api_key,
+        max_length_for_direct_call=1500, # 트렌드 요약에 사용할 최대 길이
+        chunk_size=500, # 중간 요약 청크 크기
+        delay_between_chunks=10 # 중간 요약 청크 간 지연
+    )
+    
+    if "요약 실패" in processed_content_for_ai or not processed_content_for_ai:
+        return f"뉴스 트렌드 요약을 위한 사전 처리 실패: {processed_content_for_ai}"
+
+
+    prompt = (
+        f"다음은 최근 뉴스 기사 요약문들을 종합한 내용입니다.\n"
+        f"이 내용을 바탕으로 전반적인 뉴스 트렌드를 간결하게 요약해 주세요.\n\n"
+        f"종합된 뉴스 요약 내용:\n{processed_content_for_ai}"
+    )
+
+    response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
+    if "text" in response_dict:
+        return response_dict["text"]
+    else:
+        return response_dict.get("error", "알 수 없는 오류")
+
+
+def get_insurance_implications_from_ai(trend_summary_text: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
+    """
+    AI가 요약된 트렌드 요약문을 바탕으로 자동차 보험 산업에 미칠 영향을 요약합니다.
+    """
+    if not trend_summary_text:
+        return "트렌드 요약문이 없어 자동차 보험 산업 관련 정보를 도출할 수 없습니다."
+
+    # 프롬프트 변경: 트렌드 요약문을 바탕으로 자동차 보험 산업에 미칠 영향 추론
+    prompt = (
+        f"다음은 최근 뉴스 트렌드를 요약한 내용입니다.\n"
+        f"이 트렌드 요약문을 바탕으로 '자동차 보험 산업'에 미칠 수 있는 영향에 대해 간결하게 요약해 주세요.\n" # <-- 추론 요청
+        f"한국어로 요약 내용을 제공해 주세요.\n\n"
+        f"뉴스 트렌드 요약문:\n{trend_summary_text}"
+    )
+
+    response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
+    if "text" in response_dict:
+        return response_dict["text"]
+    else:
+        return response_dict.get("error", "알 수 없는 오류")
+
 
 def clean_ai_response_text(text: str) -> str:
     """
