@@ -1,6 +1,17 @@
-requests
-beautifulsoup4
-python-dotenv
-streamlit
-pandas
-xlsxwriter
+requests             # 웹 크롤링 (news_crawler.py), AI API 호출 (ai_service.py)
+beautifulsoup4       # 웹 크롤링 (news_crawler.py)
+python-dotenv        # 환경 변수 로드 (.env 파일, app.py 및 모듈에서 사용)
+streamlit            # 웹 애플리케이션 UI (app.py 및 pages/ 모듈)
+pandas               # 데이터 처리 및 CSV/Excel 파일 생성 (app.py, data_exporter.py, trend_analyzer.py 등)
+xlsxwriter           # Excel 파일(.xlsx) 쓰기 엔진 (data_exporter.py)
+tiktoken             # 텍스트 토큰 길이 계산 (pages/document_analysis_page.py)
+langchain            # 문서 처리 및 QA 챗봇 (pages/document_analysis_page.py)
+huggingface-hub      # 임베딩 모델 로드 (pages/document_analysis_page.py)
+faiss-cpu            # 벡터 데이터베이스 생성 (pages/document_analysis_page.py)
+unstructured         # 다양한 문서 형식에서 텍스트 추출 (pages/document_analysis_page.py)
+python-pptx          # PowerPoint 문서 처리 (pages/document_analysis_page.py)
+loguru               # 로깅 (모든 모듈에서 디버깅 및 정보 출력용)
+konlpy               # 한국어 형태소 분석 (trend_analyzer.py)
+langdetect           # 텍스트 언어 감지 (trend_analyzer.py)
+nltk                 # 자연어 처리 도구 (불용어, 표제어 추출 등, trend_analyzer.py)
+sentence-transformers
