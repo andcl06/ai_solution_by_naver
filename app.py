@@ -331,44 +331,15 @@ with col_trend_results:
                             final_insights_text += "키워드 산출 근거 데이터가 없습니다.\n"
                         final_insights_text += "\n"
 
-                        # 반영된 기사 리스트 추가
+                        # 반영된 기사 리스트 추가 (배치 요약 대신 원본 기사 정보 나열)
+                        final_insights_text += "### 반영된 기사 리스트\n"
                         if st.session_state['final_collected_articles']:
-                            final_insights_text += "### 반영된 기사 리스트\n"
-                            # 기사 리스트를 3개씩 묶어 요약하는 워크플로우를 여기에 적용
-                            # 전체 기사 요약본을 3개씩 묶어 다시 요약하는 과정
-                            articles_to_summarize_in_batches = st.session_state['final_collected_articles']
-                            batch_size = 3 # 3개씩 묶어서 요약
-                            
-                            processed_articles_for_appendix = []
-                            for i in range(0, len(articles_to_summarize_in_batches), batch_size):
-                                batch = articles_to_summarize_in_batches[i:i+batch_size]
-                                combined_batch_summaries = "\n\n".join([
-                                    f"제목: {art['제목']}\n요약: {art['내용']}" for art in batch
-                                ])
-                                
-                                # 각 배치 요약 (AI 호출)
-                                prompt_batch_summary = (
-                                    f"다음 뉴스 기사 요약들을 간결하게 종합 요약해 주세요. (최대 150자)\n\n"
-                                    f"기사 요약 배치:\n{combined_batch_summaries}"
-                                )
-                                response_batch_summary = ai_service.retry_ai_call(
-                                    prompt_batch_summary, 
-                                    POTENS_API_KEY, 
-                                    max_retries=2, 
-                                    delay_seconds=10
-                                )
-                                
-                                if "text" in response_batch_summary:
-                                    processed_articles_for_appendix.append(ai_service.clean_ai_response_text(response_batch_summary["text"]))
-                                else:
-                                    processed_articles_for_appendix.append(f"[배치 요약 실패: {response_batch_summary.get('error', '알 수 없는 오류')}]")
-                                
-                                time.sleep(0.5) # 배치 요약 간 짧은 지연
-                            
-                            # 최종적으로 반영된 기사 리스트를 요약된 배치 형태로 추가
-                            for i, batch_summary in enumerate(processed_articles_for_appendix):
+                            for i, article in enumerate(st.session_state['final_collected_articles']):
                                 final_insights_text += (
-                                    f"**배치 {i+1} 요약**: {batch_summary}\n"
+                                    f"{i+1}. **제목**: {article['제목']}\n"
+                                    f"   **날짜**: {article['날짜']}\n"
+                                    f"   **링크**: {article['링크']}\n"
+                                    f"   **요약 내용**: {article['내용'][:100]}...\n" # 요약 내용의 일부만 표시
                                 )
                             final_insights_text += "\n"
                         else:
