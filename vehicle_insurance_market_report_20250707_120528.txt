@@ -1,1 +1,0 @@
-AI 호출 최종 실패: Potens.dev API 호출 오류 발생 ( network/timeout/HTTP): 502 Server Error: Bad Gateway for url: https://ai.potens.ai/api/chat Response content: <html> <head><title>502 Bad Gateway</title></head> <body> <center><h1>502 Bad Gateway</h1></center> <hr><center>nginx/1.27.1</center> </body> </html>
