@@ -3,6 +3,7 @@
 import streamlit as st
 import os # 환경 변수 접근을 위해 필요
 from loguru import logger # 로깅을 위해 필요
+from datetime import datetime # 파일명에 타임스탬프를 위해 추가
 
 # --- 모듈 임포트 ---
 from modules import ai_service # AI 서비스 모듈
@@ -39,6 +40,9 @@ def document_analysis_page():
         }]
     if "docs" not in st.session_state: # 특약 생성 기능에서 필요
         st.session_state.docs = []
+    # 'generated_endorsement_text' 대신 'generated_endorsement_sections'로 변경하여 각 섹션별로 저장
+    if 'generated_endorsement_sections' not in st.session_state:
+        st.session_state.generated_endorsement_sections = {}
 
 
     with st.sidebar:
@@ -62,6 +66,7 @@ def document_analysis_page():
                 "role": "assistant",
                 "content": "문서 분석이 완료되었습니다. 이제 질문하거나 특약을 생성할 수 있습니다."
             }]
+            st.session_state.generated_endorsement_sections = {} # 문서 처리 시 특약 초기화
             st.rerun()
 
 
@@ -118,41 +123,69 @@ def document_analysis_page():
             st.stop()
 
         all_text = "\n\n".join([doc.page_content for doc in st.session_state.docs])
-        prompt = f"""
-너는 자동차 보험을 설계하고 있는 보험사 직원이야.  
-다음 조건에 따라 자동차 보험 **특약**을 생성해줘.
+        
+        # 특약 구성 항목 정의 (협업자 파일에서 가져옴)
+        sections = {
+            "1. 특약의 명칭": "자동차 보험 표준약관을 참고하여 특약의 **명칭**을 작성해줘.",
+            "2. 특약의 목적": "이 특약의 **목적**을 설명해줘.",
+            "3. 보장 범위": "**보장 범위**에 대해 상세히 작성해줘.",
+            "4. 보험금 지급 조건": "**보험금 지급 조건**을 구체적으로 작성해줘.",
+            "5. 보험료 산정 방식": "**보험료 산정 방식**을 설명해줘.",
+            "6. 면책 사항": "**면책 사항**에 해당하는 내용을 작성해줘.",
+            "7. 특약의 적용 기간": "**적용 기간**을 명시해줘.",
+            "8. 기타 특별 조건": "**기타 특별 조건**이 있다면 제안해줘."
+        }
 
-[기본 조건]
-- 자동차 보험 표준약관을 참고해줘.
-- 아래의 구성 항목을 반드시 포함해줘:
-  1. 특약의 명칭
-  2. 특약의 목적
-  3. 보장 범위
-  4. 보험금 지급 조건
-  5. 보험료 산정 방식
-  6. 면책 사항
-  7. 특약의 적용 기간
-  8. 기타 특별 조건
+        if st.button("🚀 특약 생성 시작"):
+            all_generated_sections = {} # 각 섹션별 답변을 저장할 딕셔너리
+            full_text_for_download = "" # 다운로드용 전체 텍스트
+
+            with st.spinner("Potens API에 순차적으로 요청 중입니다..."):
+                for title, question in sections.items():
+                    st.info(f"⏳ {title} 생성 중...")
+                    prompt = f"""
+너는 자동차 보험을 설계하고 있는 보험사 직원이야.
+다음 조건에 따라 자동차 보험 특약의 '{title}'을 3~5줄 정도로 작성해줘.
 
 [기획 목적]
-- 이 특약은 **보험 상품 기획 초기 단계**에서 **트렌드 조사 및 방향성 도출에 도움**이 되는 목적으로 작성돼야 해.
-- 창의적인 요소를 포함해도 좋지만, **실제 상품화 가능성**을 고려해서 구성해줘.
-- 새로운 기술(예: 블랙박스, 자율주행, 스마트폰 앱 등)이나 최근 사회적 이슈(예: 고령 운전자 증가, 이륜차 배달 사고 등)를 반영해도 좋아.
-
-[참고자료]
-- 첨부된 자동차 보험 표준약관 문서를 분석하고, 그 구조 및 표현방식을 따라줘.
+- 이 특약은 보험 상품 기획 초기 단계에서 트렌드 조사 및 방향성 도출에 도움 되는 목적으로 작성돼야 해.
+- 새로운 기술(예: 블랙박스, 자율주행 등)이나 최근 사회적 이슈(예: 고령 운전자 증가 등)를 반영해도 좋아.
+- 표준약관 표현 방식을 따라줘.
 
 [표준약관 내용]
 {all_text}
 
-[결과]:
+[질문]
+{question}
+
+[답변]
 """
+                    # ai_service 모듈의 retry_ai_call 함수 사용
+                    response_dict = ai_service.retry_ai_call(prompt, POTENS_API_KEY)
+                    answer = ai_service.clean_ai_response_text(response_dict.get("text", response_dict.get("error", "AI 응답 실패.")))
+                    
+                    all_generated_sections[title] = answer # 각 섹션별로 저장
+                    full_text_for_download += f"#### {title}\n{answer.strip()}\n\n" # 다운로드용 텍스트에 추가
 
-        if st.button("🚀 특약 생성 시작"):
-            with st.spinner("Potens API에 요청 중입니다..."):
-                # ai_service 모듈의 retry_ai_call 함수 사용
-                response_dict = ai_service.retry_ai_call(prompt, POTENS_API_KEY)
-                answer = ai_service.clean_ai_response_text(response_dict.get("text", response_dict.get("error", "AI 응답 실패.")))
+            st.session_state.generated_endorsement_sections = all_generated_sections # 세션 상태에 딕셔너리로 저장
+            st.success("✅ 특약 생성 완료!")
+            st.rerun() # 생성 완료 후 UI 업데이트를 위해 rerun
 
-            st.markdown("### ✅ 생성된 특약")
-            st.markdown(answer)
+        # 생성된 특약이 세션 상태에 있으면 표시
+        if st.session_state.generated_endorsement_sections:
+            st.markdown("### 📄 최종 생성된 특약")
+            # 세션 상태에 저장된 각 섹션을 반복하여 마크다운으로 표시
+            full_text_for_download_display = "" # 화면 표시와 다운로드용 텍스트를 분리
+            for title, content in st.session_state.generated_endorsement_sections.items():
+                st.markdown(f"#### {title}") # 협업자 코드처럼 각 섹션 제목을 마크다운 헤더로
+                st.write(content) # 각 섹션의 내용을 일반 텍스트로 표시하여 글자 크기 제어
+                full_text_for_download_display += f"#### {title}\n{content.strip()}\n\n" # 다운로드용 텍스트 다시 구성
+
+            # 다운로드 버튼 추가
+            st.download_button(
+                label="📥 특약 전체 다운로드 (.txt)",
+                data=full_text_for_download_display, # 화면에 표시된 내용과 동일하게 다운로드
+                file_name=f"생성된_보험_특약_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt", # 파일명에 타임스탬프 추가
+                mime="text/plain"
+            )
+

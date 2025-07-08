@@ -259,20 +259,23 @@ def clean_ai_response_text(text: str) -> str:
     """
     AI 응답 텍스트에서 불필요한 마크다운 기호, 여러 줄바꿈,
     그리고 AI가 자주 사용하는 서두 문구들을 제거하여 평탄화합니다.
+    특히, 텍스트 크기를 키울 수 있는 마크다운 헤더 기호를 적극적으로 제거합니다.
     """
     # 마크다운 코드 블록 제거 (예: ```json ... ```)
     cleaned_text = re.sub(r'```(?:json|text)?\s*([\s\S]*?)\s*```', r'\1', text, flags=re.IGNORECASE)
 
     # 마크다운 헤더, 리스트 기호, 볼드체/이탤릭체 기호 등 제거
-    # 이 부분은 get_prettified_report에서 마크다운 포맷팅을 요청하므로,
-    # 해당 함수에서 호출될 때는 주석 처리하거나 더 정교하게 처리해야 할 수 있음.
-    # 현재는 일반적인 클리닝을 위해 유지.
-    # 만약 AI가 마크다운을 잘 생성한다면 이 라인은 제거하는 것이 좋음.
-    # cleaned_text = re.sub(r'#|\*|-|\+', '', cleaned_text)
+    # 이 부분이 텍스트 크기를 키우는 주요 원인이므로, 적극적으로 제거합니다.
+    # 단, 볼드체는 유지하는 것이 좋을 수 있으므로, #, -, + 만 제거하도록 조정
+    cleaned_text = re.sub(r'#+\s*|[-+]\s*', '', cleaned_text) # #으로 시작하는 헤더, - 또는 +로 시작하는 리스트 기호 제거
+    cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text) # **볼드체** 제거 (텍스트만 남김)
+    cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text) # __볼드체__ 제거 (텍스트만 남김)
+    cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text) # *이탤릭체* 제거 (텍스트만 남김)
+    cleaned_text = re.sub(r'_(.*?)_', r'\1', cleaned_text) # _이탤릭체_ 제거 (텍스트만 남김)
+
 
     # 번호가 매겨진 목록 마커 제거 (예: "1.", "2.", "3.")
-    # get_prettified_report에서 표 생성을 요청했으므로, 이 부분도 AI가 잘 처리할 경우 제거 고려.
-    # cleaned_text = re.sub(r'^\s*\d+\.\s*', '', cleaned_text, flags=re.MULTILINE)
+    cleaned_text = re.sub(r'^\s*\d+\.\s*', '', cleaned_text, flags=re.MULTILINE)
 
     # AI가 자주 사용하는 서두 문구 제거 (정규표현식으로 유연하게 매칭)
     patterns_to_remove = [
