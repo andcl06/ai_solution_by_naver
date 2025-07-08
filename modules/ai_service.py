@@ -225,6 +225,35 @@ def get_insurance_implications_from_ai(trend_summary_text: str, api_key: str, ma
     else:
         return response_dict.get("error", "알 수 없는 오류")
 
+def get_prettified_report(raw_report_text: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
+    """
+    Potens.dev AI를 호출하여 원본 보고서 텍스트를 바탕으로
+    더욱 보기 좋고 전문적인 형식의 보고서를 생성합니다.
+    """
+    if not raw_report_text:
+        return "포맷팅할 보고서 내용이 없습니다."
+
+    prompt = (
+        f"다음은 뉴스 트렌드 분석 및 보험 상품 개발 인사이트에 대한 보고서 초안입니다.\n"
+        f"이 초안의 내용을 유지하면서, 다음 지침에 따라 더욱 전문적이고 가독성 높은 보고서로 재구성해 주세요.\n\n"
+        f"[지침]\n"
+        f"- 보고서의 각 섹션(뉴스 트렌드 요약, 자동차 보험 산업 관련 주요 사실 및 법적 책임, 부록)을 명확하게 구분하고, 적절한 제목과 부제목을 사용해 주세요.\n"
+        f"- 문단 간의 간격을 적절히 조절하여 가독성을 높여 주세요.\n"
+        f"- 핵심 내용은 강조(예: 볼드체)하거나 목록 형태로 정리하여 시각적으로 돋보이게 해주세요.\n"
+        f"- '키워드 산출 근거'와 '반영된 기사 리스트'는 표(테이블) 형태로 깔끔하게 정리해 주세요.\n"
+        f"- 보고서의 전체적인 흐름이 자연스럽고 논리적으로 연결되도록 해주세요.\n"
+        f"- 불필요한 반복이나 비문은 수정하고, 전문적인 보고서 톤앤매너를 유지해 주세요.\n"
+        f"- 모든 내용은 한국어로 작성해 주세요.\n\n"
+        f"[보고서 초안]\n"
+        f"{raw_report_text}"
+    )
+
+    response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
+    if "text" in response_dict:
+        return clean_ai_response_text(response_dict["text"]) # AI 응답도 한 번 더 클리닝
+    else:
+        return response_dict.get("error", "AI를 통한 보고서 포맷팅 실패.")
+
 
 def clean_ai_response_text(text: str) -> str:
     """
@@ -235,10 +264,15 @@ def clean_ai_response_text(text: str) -> str:
     cleaned_text = re.sub(r'```(?:json|text)?\s*([\s\S]*?)\s*```', r'\1', text, flags=re.IGNORECASE)
 
     # 마크다운 헤더, 리스트 기호, 볼드체/이탤릭체 기호 등 제거
-    cleaned_text = re.sub(r'#|\*|-|\+', '', cleaned_text)
+    # 이 부분은 get_prettified_report에서 마크다운 포맷팅을 요청하므로,
+    # 해당 함수에서 호출될 때는 주석 처리하거나 더 정교하게 처리해야 할 수 있음.
+    # 현재는 일반적인 클리닝을 위해 유지.
+    # 만약 AI가 마크다운을 잘 생성한다면 이 라인은 제거하는 것이 좋음.
+    # cleaned_text = re.sub(r'#|\*|-|\+', '', cleaned_text)
 
     # 번호가 매겨진 목록 마커 제거 (예: "1.", "2.", "3.")
-    cleaned_text = re.sub(r'^\s*\d+\.\s*', '', cleaned_text, flags=re.MULTILINE)
+    # get_prettified_report에서 표 생성을 요청했으므로, 이 부분도 AI가 잘 처리할 경우 제거 고려.
+    # cleaned_text = re.sub(r'^\s*\d+\.\s*', '', cleaned_text, flags=re.MULTILINE)
 
     # AI가 자주 사용하는 서두 문구 제거 (정규표현식으로 유연하게 매칭)
     patterns_to_remove = [
@@ -281,3 +315,4 @@ def clean_ai_response_text(text: str) -> str:
     # 여러 개의 공백을 하나로 대체 (줄바꿈 대체 후에도 중복 공백이 생길 수 있으므로)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     return cleaned_text
+
