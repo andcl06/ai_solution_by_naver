@@ -40,6 +40,8 @@ Thumbs.db
 
 # Database
 news_data.db
+ai_insights_report_*.txt
+vehicle_insurance_market_report_*.txt
 
 # Streamlit specific
 .streamlit/
