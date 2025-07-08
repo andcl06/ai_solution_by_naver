@@ -11,7 +11,6 @@ from dotenv import load_dotenv # 이 페이지에서는 os.getenv로 바로 접�
 from io import BytesIO
 
 # --- 모듈 임포트 (경로 조정) ---
-# pages 디렉토리에서 modules 디렉토리로 접근하기 위해 'modules.' 접두사 사용
 from modules import ai_service
 from modules import database_manager
 from modules import news_crawler
@@ -24,7 +23,6 @@ def trend_analysis_page():
     """
     최신 뉴스 기반 트렌드 분석 및 보고서 생성을 수행하는 페이지입니다.
     """
-    # st.set_page_config는 main_app.py에서 설정하므로 여기서는 제거
     st.title("📰 뉴스 트렌드 분석기")
     st.markdown("원하는 키워드로 네이버 뉴스 트렌드를 감지하고, AI가 요약한 기사 내용을 확인하세요.")
 
@@ -35,20 +33,17 @@ def trend_analysis_page():
     st.markdown("---") # 버튼 아래 구분선 추가
 
     # --- Potens.dev AI API 키 설정 ---
-    # main_app.py에서 이미 load_dotenv()를 호출했으므로, 여기서는 os.getenv로 바로 접근
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
     if not POTENS_API_KEY:
         st.error("🚨 오류: .env 파일에 'POTENS_API_KEY'가 설정되지 않았습니다. Potens.dev AI 기능을 사용할 수 없습니다.")
-        # API 키가 없으면 더 이상 진행하지 않도록 return
         return
 
-    # 데이터베이스 초기화 (앱 시작 시 main_app에서 이미 호출될 수 있으나, 페이지 진입 시 재확인)
+    # 데이터베이스 초기화
     database_manager.init_db()
 
-    # --- Streamlit Session State 초기화 (페이지 진입 시 필요한 경우) ---
-    # 각 페이지는 자신의 세션 상태 변수를 명확히 관리하는 것이 좋습니다.
-    # main_app.py에서 공통 변수는 초기화했지만, 페이지별 변수는 여기서 초기화합니다.
+    # --- Streamlit Session State 초기화 (페이지 진입 시 항상 실행) ---
+    # 모든 세션 상태 변수가 이 블록에서 초기화되도록 보장합니다.
     if 'trending_keywords_data' not in st.session_state:
         st.session_state['trending_keywords_data'] = []
     if 'displayed_keywords' not in st.session_state:
@@ -61,6 +56,15 @@ def trend_analysis_page():
         st.session_state['ai_trend_summary'] = ""
     if 'ai_insurance_info' not in st.session_state:
         st.session_state['ai_insurance_info'] = ""
+    if 'submitted_flag' not in st.session_state:
+        st.session_state['submitted_flag'] = False
+    if 'analysis_completed' not in st.session_state:
+        st.session_state['analysis_completed'] = False
+    # db_status_message와 db_status_type이 항상 초기화되도록 이 블록으로 이동
+    if 'db_status_message' not in st.session_state:
+        st.session_state['db_status_message'] = ""
+    if 'db_status_type' not in st.session_state:
+        st.session_state['db_status_type'] = ""
 
 
     # --- UI 레이아웃: 검색 조건 (좌) & 키워드 트렌드 결과 (우) ---
@@ -84,7 +88,7 @@ def trend_analysis_page():
         status_message_placeholder = st.empty()
 
         if submitted:
-            # 새로운 검색 요청 시 기존 상태 초기화
+            # 새로운 검색 요청 시 기존 상태 초기화 (이전 초기화는 그대로 유지)
             st.session_state['trending_keywords_data'] = []
             st.session_state['displayed_keywords'] = []
             st.session_state['final_collected_articles'] = []
