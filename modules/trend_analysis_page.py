@@ -3,11 +3,11 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import time
-import re
+import re # 정규 표현식을 위해 추가
 import os
 import json
 import pandas as pd
-from dotenv import load_dotenv # 이 페이지에서는 os.getenv로 바로 접근하므로 load_dotenv는 필요 없음
+from dotenv import load_dotenv
 from io import BytesIO
 
 # --- 모듈 임포트 (경로 조정) ---
@@ -17,12 +17,23 @@ from modules import news_crawler
 from modules import trend_analyzer
 from modules import data_exporter
 
+# --- 기존 보고서 포맷팅 함수 제거 (이제 AI가 담당) ---
+# def parse_and_format_report_for_display(report_text: str) -> str:
+#     """
+#     제공된 보고서 텍스트를 파싱하고 재구성하여 다운로드용 마크다운 형식으로 반환합니다.
+#     (이 함수는 화면 표시가 아닌 파일 다운로드 시 사용됩니다.)
+#     """
+#     formatted_output = []
+#     # ... (기존 포맷팅 로직 제거)
+#     return "\n".join(formatted_output)
+
 
 # --- 페이지 함수 정의 ---
 def trend_analysis_page():
     """
     최신 뉴스 기반 트렌드 분석 및 보고서 생성을 수행하는 페이지입니다.
     """
+    # Streamlit 페이지 설정은 main_app.py에서 하므로 여기서는 제거
     st.title("📰 뉴스 트렌드 분석기")
     st.markdown("원하는 키워드로 네이버 뉴스 트렌드를 감지하고, AI가 요약한 기사 내용을 확인하세요.")
 
@@ -33,38 +44,39 @@ def trend_analysis_page():
     st.markdown("---") # 버튼 아래 구분선 추가
 
     # --- Potens.dev AI API 키 설정 ---
+    # main_app.py에서 이미 load_dotenv()를 호출했으므로, 여기서는 os.getenv로 바로 접근
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
     if not POTENS_API_KEY:
         st.error("🚨 오류: .env 파일에 'POTENS_API_KEY'가 설정되지 않았습니다. Potens.dev AI 기능을 사용할 수 없습니다.")
+        # API 키가 없으면 더 이상 진행하지 않도록 return
         return
 
-    # 데이터베이스 초기화
+    # 데이터베이스 초기화 (앱 시작 시 main_app에서 이미 호출될 수 있으나, 페이지 진입 시 재확인)
     database_manager.init_db()
 
-    # --- Streamlit Session State 초기화 (페이지 진입 시 항상 실행) ---
-    # 모든 세션 상태 변수가 이 블록에서 초기화되도록 보장합니다.
+    # --- Streamlit Session State 초기화 (페이지 진입 시 필요한 경우) ---
+    # 각 페이지는 자신의 세션 상태 변수를 명확히 관리하는 것이 좋습니다.
+    # main_app.py에서 공통 변수는 초기화했지만, 페이지별 변수는 여기서 초기화합니다.
     if 'trending_keywords_data' not in st.session_state:
         st.session_state['trending_keywords_data'] = []
     if 'displayed_keywords' not in st.session_state:
         st.session_state['displayed_keywords'] = []
     if 'final_collected_articles' not in st.session_state:
         st.session_state['final_collected_articles'] = []
-    if 'ai_insights_summary' not in st.session_state:
+    if 'ai_insights_summary' not in st.session_state: # 원본 보고서 텍스트 (다운로드용)
         st.session_state['ai_insights_summary'] = ""
     if 'ai_trend_summary' not in st.session_state:
         st.session_state['ai_trend_summary'] = ""
     if 'ai_insurance_info' not in st.session_state:
         st.session_state['ai_insurance_info'] = ""
-    if 'submitted_flag' not in st.session_state:
-        st.session_state['submitted_flag'] = False
-    if 'analysis_completed' not in st.session_state:
-        st.session_state['analysis_completed'] = False
-    # db_status_message와 db_status_type이 항상 초기화되도록 이 블록으로 이동
+    # 새로 추가: db_status_message와 db_status_type 초기화
     if 'db_status_message' not in st.session_state:
         st.session_state['db_status_message'] = ""
     if 'db_status_type' not in st.session_state:
         st.session_state['db_status_type'] = ""
+    if 'prettified_report_for_download' not in st.session_state: # AI가 포맷한 보고서 저장
+        st.session_state['prettified_report_for_download'] = ""
 
 
     # --- UI 레이아웃: 검색 조건 (좌) & 키워드 트렌드 결과 (우) ---
@@ -88,13 +100,14 @@ def trend_analysis_page():
         status_message_placeholder = st.empty()
 
         if submitted:
-            # 새로운 검색 요청 시 기존 상태 초기화 (이전 초기화는 그대로 유지)
+            # 새로운 검색 요청 시 기존 상태 초기화
             st.session_state['trending_keywords_data'] = []
             st.session_state['displayed_keywords'] = []
             st.session_state['final_collected_articles'] = []
             st.session_state['ai_insights_summary'] = ""
             st.session_state['ai_trend_summary'] = ""
             st.session_state['ai_insurance_info'] = ""
+            st.session_state['prettified_report_for_download'] = "" # AI 포맷 보고서도 초기화
 
             st.session_state['submitted_flag'] = True
             st.session_state['analysis_completed'] = False
@@ -290,60 +303,74 @@ def trend_analysis_page():
                                     status_message_placeholder.success("AI 자동차 보험 산업 관련 정보 분석 완료!")
                                 time.sleep(1) # 다음 UI 업데이트 전 잠시 대기
 
-                            # 두 결과를 합쳐서 최종 인사이트 요약 생성
-                            final_insights_text = ""
+                            # 두 결과를 합쳐서 최종 인사이트 요약 생성 (다운로드용 원본 텍스트)
+                            final_insights_text_raw = ""
                             if st.session_state['ai_trend_summary'] and \
                                not st.session_state['ai_trend_summary'].startswith("AI 호출 최종 실패"):
-                                final_insights_text += "### 뉴스 트렌드 요약\n"
-                                final_insights_text += st.session_state['ai_trend_summary'] + "\n\n"
+                                final_insights_text_raw += "### 뉴스 트렌드 요약\n"
+                                final_insights_text_raw += st.session_state['ai_trend_summary'] + "\n\n"
                             else:
-                                final_insights_text += "### 뉴스 트렌드 요약 (생성 실패)\n"
-                                final_insights_text += st.session_state['ai_trend_summary'] + "\n\n"
+                                final_insights_text_raw += "### 뉴스 트렌드 요약 (생성 실패)\n"
+                                final_insights_text_raw += st.session_state['ai_trend_summary'] + "\n\n"
 
                             if st.session_state['ai_insurance_info'] and \
                                not st.session_state['ai_insurance_info'].startswith("AI 호출 최종 실패") and \
                                not st.session_state['ai_insurance_info'].startswith("트렌드 요약문이 없어"): # 트렌드 요약문이 없는 경우도 실패
-                                final_insights_text += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임\n"
-                                final_insights_text += st.session_state['ai_insurance_info'] + "\n"
+                                final_insights_text_raw += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임\n"
+                                final_insights_text_raw += st.session_state['ai_insurance_info'] + "\n"
                             else:
-                                final_insights_text += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임 (생성 실패)\n"
-                                final_insights_text += st.session_state['ai_insurance_info'] + "\n"
+                                final_insights_text_raw += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임 (생성 실패)\n"
+                                final_insights_text_raw += st.session_state['ai_insurance_info'] + "\n"
 
                             # --- 부록 섹션 추가 ---
-                            final_insights_text += "\n---\n\n"
-                            final_insights_text += "## 부록\n\n"
+                            final_insights_text_raw += "\n---\n\n"
+                            final_insights_text_raw += "## 부록\n\n"
 
                             # 키워드 산출 근거 추가
-                            final_insights_text += "### 키워드 산출 근거\n"
+                            final_insights_text_raw += "### 키워드 산출 근거\n"
                             if st.session_state['displayed_keywords']:
                                 for kw_data in st.session_state['displayed_keywords']:
                                     # f-string 문법 오류 수정
                                     surge_ratio_display = (f'''{kw_data.get('surge_ratio'):.2f}x''' if kw_data.get('surge_ratio') != float('inf') else '새로운 트렌드')
-                                    final_insights_text += (
+                                    final_insights_text_raw += (
                                         f"- **키워드**: {kw_data['keyword']}\n"
                                         f"  - 최근 언급량: {kw_data['recent_freq']}회\n"
                                         f"  - 이전 언급량: {kw_data['past_freq']}회\n"
                                         f"  - 증가율: {surge_ratio_display}\n"
                                     )
                             else:
-                                final_insights_text += "키워드 산출 근거 데이터가 없습니다.\n"
-                            final_insights_text += "\n"
+                                final_insights_text_raw += "키워드 산출 근거 데이터가 없습니다.\n"
+                            final_insights_text_raw += "\n"
 
                             # 반영된 기사 리스트 추가 (배치 요약 대신 원본 기사 정보 나열)
-                            final_insights_text += "### 반영된 기사 리스트\n"
+                            final_insights_text_raw += "### 반영된 기사 리스트\n"
                             if st.session_state['final_collected_articles']:
                                 for i, article in enumerate(st.session_state['final_collected_articles']):
-                                    final_insights_text += (
+                                    final_insights_text_raw += (
                                         f"{i+1}. **제목**: {article['제목']}\n"
                                         f"   **날짜**: {article['날짜']}\n" # 오타 수정
                                         f"   **링크**: {article['링크']}\n"
                                         f"   **요약 내용**: {article['내용'][:100]}...\n" # 요약 내용의 일부만 표시
                                     )
-                                final_insights_text += "\n"
+                                final_insights_text_raw += "\n"
                             else:
-                                final_insights_text += "반영된 기사 리스트가 없습니다.\n"
+                                final_insights_text_raw += "반영된 기사 리스트가 없습니다.\n"
 
-                            st.session_state['ai_insights_summary'] = final_insights_text
+                            st.session_state['ai_insights_summary'] = final_insights_text_raw
+                            
+                            # 새로 추가: AI에게 포맷팅 요청
+                            with st.spinner("AI가 보고서 최종 포맷팅 중..."):
+                                prettified_report = ai_service.get_prettified_report(
+                                    st.session_state['ai_insights_summary'],
+                                    POTENS_API_KEY
+                                )
+                                # AI가 포맷팅에 실패한 경우 원본 텍스트라도 사용
+                                if prettified_report.startswith("AI를 통한 보고서 포맷팅 실패"):
+                                    st.session_state['prettified_report_for_download'] = st.session_state['ai_insights_summary']
+                                    status_message_placeholder.warning("AI 보고서 포맷팅에 실패했습니다. 원본 텍스트로 다운로드됩니다.")
+                                else:
+                                    st.session_state['prettified_report_for_download'] = prettified_report
+
 
                         else:
                             status_message_placeholder.info("선별된 트렌드 키워드를 포함하는 기사가 없거나, AI 요약에 실패했습니다.")
@@ -353,6 +380,7 @@ def trend_analysis_page():
 
             st.session_state['submitted_flag'] = False
             st.session_state['analysis_completed'] = True
+            st.rerun() # 분석 완료 후 UI 업데이트를 위해 rerun
 
         # --- 결과가 이미 세션 상태에 있는 경우 표시 ---
         if not st.session_state.get('submitted_flag', False) and \
@@ -365,24 +393,10 @@ def trend_analysis_page():
                 table_placeholder.table(df_top_keywords)
 
                 if st.session_state['final_collected_articles']:
-                    status_message_placeholder.success(f"총 {len(st.session_state['final_collected_articles'])}개의 트렌드 기사 요약을 완료했습니다.")
-
-                    # AI 인사이트 요약 표시 (트렌드 보고서)
-                    # 이 부분을 주석 처리하여 화면에 표시되지 않도록 함
-                    # if st.session_state['ai_insights_summary']:
-                    #     st.markdown("---")
-                    #     st.subheader("💡 AI 트렌드 요약 및 보험 상품 개발 인사이트")
-                    #     st.markdown(st.session_state['ai_insights_summary'])
-                    # else:
-                    #     st.info("AI 트렌드 요약 및 보험 상품 개발 인사이트가 아직 없습니다. 분석을 실행해주세요.")
-                    
-                    # 대신, 분석 완료 메시지에 다운로드 안내 추가
                     status_message_placeholder.success(
                         f"총 {len(st.session_state['final_collected_articles'])}개의 트렌드 기사 요약을 완료했습니다. "
                         "AI 트렌드 요약 및 보험 상품 개발 인사이트 보고서는 아래 '데이터 다운로드' 섹션에서 다운로드할 수 있습니다."
                     )
-
-
             else:
                 st.info("선택된 기간 내에 유의미한 트렌드 키워드가 식별되지 않았습니다.")
         # --- 초기 로드 시 메시지 ---
@@ -429,9 +443,19 @@ def trend_analysis_page():
         if not df_ai_summaries.empty:
             excel_data_ai_summaries = data_exporter.export_articles_to_excel(df_ai_summaries, sheet_name='AI_Summaries')
 
-        txt_data_ai_insights = st.session_state['ai_insights_summary']
+        # 변경된 부분: TXT 다운로드 시 AI가 포맷한 보고서 사용
+        if st.session_state['prettified_report_for_download']:
+            txt_data_ai_insights = st.session_state['prettified_report_for_download']
+        elif st.session_state['ai_insights_summary']: # AI 포맷팅 실패 시 원본이라도 제공
+            txt_data_ai_insights = st.session_state['ai_insights_summary']
+        else:
+            txt_data_ai_insights = "AI 트렌드 요약 및 보험 상품 개발 인사이트가 없습니다."
+
 
         if st.session_state['ai_insights_summary']:
+            # AI 인사이트 엑셀 다운로드용 DataFrame (원본 구조 기반)
+            # 이 DataFrame의 내용은 이미 AI가 생성한 원본 텍스트를 기반으로 하며,
+            # data_exporter.export_articles_to_excel에서 xlsxwriter를 통해 스타일링이 적용됨.
             ai_insights_df = pd.DataFrame({
                 '보고서 섹션': ['뉴스 트렌드 요약', '자동차 보험 산업 관련 주요 사실 및 법적 책임', '키워드 산출 근거', '반영된 기사 리스트'],
                 '내용': [
@@ -498,7 +522,7 @@ def trend_analysis_page():
             with col_ai_insights_txt:
                 st.download_button(
                     label="📄 TXT 다운로드",
-                    data=txt_data_ai_insights,
+                    data=txt_data_ai_insights, # 이제 이 변수에 AI가 포맷한 내용이 들어갑니다.
                     file_name=data_exporter.generate_filename("ai_insights_report", "txt"),
                     mime="text/plain",
                     help="AI가 도출한 트렌드 요약 및 보험 상품 개발 인사이트 보고서를 텍스트 파일로 다운로드합니다."
@@ -541,4 +565,6 @@ def trend_analysis_page():
                 st.session_state['ai_insurance_info'] = ""
                 st.session_state['submitted_flag'] = False
                 st.session_state['analysis_completed'] = False
+                st.session_state['prettified_report_for_download'] = "" # DB 초기화 시 AI 포맷 보고서도 초기화
                 st.rerun()
+

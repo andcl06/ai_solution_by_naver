@@ -138,6 +138,7 @@ def summarize_long_combined_text(combined_text: str, api_key: str,
     if len(combined_text) <= max_length_for_direct_call:
         # 길이가 충분히 짧으면 직접 요약 요청
         prompt = f"다음 텍스트를 간결하게 요약해 주세요.\n\n텍스트: {combined_text}"
+        # delay_seconds 인자 추가
         response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_between_chunks)
         if "text" in response_dict:
             return clean_ai_response_text(response_dict["text"])
@@ -150,6 +151,7 @@ def summarize_long_combined_text(combined_text: str, api_key: str,
     summarized_chunks = []
     for i, chunk in enumerate(chunks):
         prompt = f"다음 텍스트를 간결하게 요약해 주세요.\n\n텍스트: {chunk}"
+        # delay_seconds 인자 추가
         response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_between_chunks)
         
         if "text" in response_dict:
@@ -225,6 +227,40 @@ def get_insurance_implications_from_ai(trend_summary_text: str, api_key: str, ma
     else:
         return response_dict.get("error", "알 수 없는 오류")
 
+def clean_prettified_report_text(text: str) -> str:
+    """
+    AI가 포맷한 보고서 텍스트에서 불필요한 AI 서두/맺음말 문구만 제거하고,
+    마크다운 포맷팅(헤더, 목록, 줄바꿈)은 최대한 유지합니다.
+    """
+    cleaned_text = text
+
+    # AI가 자주 사용하는 서두/맺음말 문구 제거 (정규표현식으로 유연하게 매칭)
+    patterns_to_remove = [
+        r'다음은 뉴스 트렌드 분석 및 보험 상품 개발 인사이트에 대한 보고서 초안을 바탕으로 재구성된 전문적인 보고서입니다[.:\s]*',
+        r'다음은 요청하신 지침에 따라 재구성된 보고서입니다[.:\s]*',
+        r'다음은 재구성된 보고서입니다[.:\s]*',
+        r'보고서:\s*',
+        r'보고서 내용:\s*',
+        r'\[보고서\]:\s*',
+        r'\[결과\]:\s*',
+        r'이상입니다[.:\s]*',
+        r'위 보고서는 제공된 정보를 바탕으로 재구성되었습니다[.:\s]*',
+        r'이 보고서가 트렌드 분석 및 보험 상품 개발에 도움이 되기를 바랍니다[.:\s]*',
+        r'이 보고서가 귀사의 비즈니스에 도움이 되기를 바랍니다[.:\s]*',
+        r'이 보고서는 제공된 초안을 바탕으로 작성되었습니다[.:\s]*'
+    ]
+    for pattern in patterns_to_remove:
+        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
+
+    # 여러 개의 공백을 하나로 대체 (줄바꿈은 유지)
+    cleaned_text = re.sub(r'[ \t]+', ' ', cleaned_text)
+    
+    # 문단 시작 부분의 불필요한 공백 제거 (줄바꿈은 유지)
+    cleaned_text = re.sub(r'^\s+', '', cleaned_text, flags=re.MULTILINE)
+
+    return cleaned_text.strip()
+
+
 def get_prettified_report(raw_report_text: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
     """
     Potens.dev AI를 호출하여 원본 보고서 텍스트를 바탕으로
@@ -235,22 +271,27 @@ def get_prettified_report(raw_report_text: str, api_key: str, max_attempts: int 
 
     prompt = (
         f"다음은 뉴스 트렌드 분석 및 보험 상품 개발 인사이트에 대한 보고서 초안입니다.\n"
-        f"이 초안의 내용을 유지하면서, 다음 지침에 따라 더욱 전문적이고 가독성 높은 보고서로 재구성해 주세요.\n\n"
+        f"이 초안의 내용을 유지하면서, 다음 지침에 따라 더욱 전문적이고 가독성 높은 보고서로 재구성해 주세요.\n"
+        f"특히, 텍스트 파일로 저장했을 때 줄바꿈과 들여쓰기가 명확하게 보이도록 마크다운 문법을 활용하여 구조화해 주세요.\n\n"
         f"[지침]\n"
-        f"- 보고서의 각 섹션(뉴스 트렌드 요약, 자동차 보험 산업 관련 주요 사실 및 법적 책임, 부록)을 명확하게 구분하고, 적절한 제목과 부제목을 사용해 주세요.\n"
-        f"- 문단 간의 간격을 적절히 조절하여 가독성을 높여 주세요.\n"
+        f"- 보고서의 시작은 '제목: [보고서 제목]'으로 시작하고, 그 아래 '개요:'를 포함해 주세요.\n"
+        f"- '주요 내용:' 섹션을 만들고, 그 안에 '트렌드 1:', '트렌드 2:' 와 같이 구체적인 트렌드를 명시하고 들여쓰기를 적용하여 설명해 주세요. (예: 'ㄴ트렌드 1: [내용]')\n"
+        f"- '자동차 보험 산업 관련 주요 사실 및 법적 책임' 섹션은 '보험 시사점:'으로 변경하고, 각 시사점을 목록 형태로 명확히 구분하여 작성해 주세요.\n"
+        f"- '부록' 섹션은 '키워드 산출 근거'와 '반영된 기사 리스트'를 포함하며, 각 항목은 표(테이블) 형태로 깔끔하게 정리해 주세요.\n"
+        f"- 문단 간의 간격을 적절히 조절하여 가독성을 높여 주세요. 각 문단은 최소 한 줄 이상 비워주세요.\n"
         f"- 핵심 내용은 강조(예: 볼드체)하거나 목록 형태로 정리하여 시각적으로 돋보이게 해주세요.\n"
-        f"- '키워드 산출 근거'와 '반영된 기사 리스트'는 표(테이블) 형태로 깔끔하게 정리해 주세요.\n"
         f"- 보고서의 전체적인 흐름이 자연스럽고 논리적으로 연결되도록 해주세요.\n"
         f"- 불필요한 반복이나 비문은 수정하고, 전문적인 보고서 톤앤매너를 유지해 주세요.\n"
-        f"- 모든 내용은 한국어로 작성해 주세요.\n\n"
+        f"- 모든 내용은 한국어로 작성해 주세요.\n"
+        f"- **중요: 응답은 오직 재구성된 보고서 내용만 포함해야 합니다. 다른 설명이나 서두 문구는 절대 포함하지 마세요.**\n\n"
         f"[보고서 초안]\n"
         f"{raw_report_text}"
     )
 
     response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
     if "text" in response_dict:
-        return clean_ai_response_text(response_dict["text"]) # AI 응답도 한 번 더 클리닝
+        # 새로운 클리닝 함수를 사용하여 AI가 포맷한 보고서 텍스트를 정리
+        return clean_prettified_report_text(response_dict["text"])
     else:
         return response_dict.get("error", "AI를 통한 보고서 포맷팅 실패.")
 
@@ -259,25 +300,29 @@ def clean_ai_response_text(text: str) -> str:
     """
     AI 응답 텍스트에서 불필요한 마크다운 기호, 여러 줄바꿈,
     그리고 AI가 자주 사용하는 서두 문구들을 제거하여 평탄화합니다.
-    특히, 텍스트 크기를 키울 수 있는 마크다운 헤더 기호를 적극적으로 제거합니다.
+    이 함수는 주로 요약이나 QA 답변 등 일반 텍스트 출력을 위해 사용됩니다.
     """
-    # 마크다운 코드 블록 제거 (예: ```json ... ```)
+    # 1. 마크다운 코드 블록 제거 (예: ```json ... ```)
     cleaned_text = re.sub(r'```(?:json|text)?\s*([\s\S]*?)\s*```', r'\1', text, flags=re.IGNORECASE)
 
-    # 마크다운 헤더, 리스트 기호, 볼드체/이탤릭체 기호 등 제거
-    # 이 부분이 텍스트 크기를 키우는 주요 원인이므로, 적극적으로 제거합니다.
-    # 단, 볼드체는 유지하는 것이 좋을 수 있으므로, #, -, + 만 제거하도록 조정
-    cleaned_text = re.sub(r'#+\s*|[-+]\s*', '', cleaned_text) # #으로 시작하는 헤더, - 또는 +로 시작하는 리스트 기호 제거
-    cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text) # **볼드체** 제거 (텍스트만 남김)
-    cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text) # __볼드체__ 제거 (텍스트만 남김)
-    cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text) # *이탤릭체* 제거 (텍스트만 남김)
-    cleaned_text = re.sub(r'_(.*?)_', r'\1', cleaned_text) # _이탤릭체_ 제거 (텍스트만 남김)
+    # 2. 마크다운 헤더 기호 제거 (예: #, ##, ### 등) - 줄 시작에 관계없이 모든 # 제거
+    #    이전 버전에서 #+ 였으나, 이제는 #만 제거하고 +는 리스트 기호로 따로 처리
+    cleaned_text = re.sub(r'#+', '', cleaned_text)
 
+    # 3. 마크다운 볼드체/이탤릭체 기호 제거 (예: **, __, *, _) - 텍스트는 남기고 기호만 제거
+    cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text) # **text** -> text
+    cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text) # __text__ -> text
+    cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text) # *text* -> text
+    cleaned_text = re.sub(r'_(.*?)_', r'\1', cleaned_text) # _text_ -> text
 
-    # 번호가 매겨진 목록 마커 제거 (예: "1.", "2.", "3.")
+    # 4. 마크다운 리스트 기호 제거 (예: -, +) - 줄 시작에 관계없이 제거
+    #    \s*는 공백을 의미하며, 리스트 기호 뒤에 공백이 있을 수 있으므로 포함
+    cleaned_text = re.sub(r'^\s*[-+]\s*', '', cleaned_text, flags=re.MULTILINE)
+
+    # 5. 번호가 매겨진 목록 마커 제거 (예: "1.", "2.", "3.") - 줄 시작에 관계없이 제거
     cleaned_text = re.sub(r'^\s*\d+\.\s*', '', cleaned_text, flags=re.MULTILINE)
 
-    # AI가 자주 사용하는 서두 문구 제거 (정규표현식으로 유연하게 매칭)
+    # 6. AI가 자주 사용하는 서두 문구 제거 (정규표현식으로 유연하게 매칭)
     patterns_to_remove = [
         r'제공해주신\s*URL의\s*뉴스\s*기사\s*내용을\s*요약해드리겠습니다[.:\s]*',
         r'주요\s*내용[.:\s]*',
@@ -313,9 +358,12 @@ def clean_ai_response_text(text: str) -> str:
     for pattern in patterns_to_remove:
         cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
 
-    # 여러 개의 줄바꿈을 하나의 공백으로 대체
-    cleaned_text = re.sub(r'\n+', ' ', cleaned_text)
-    # 여러 개의 공백을 하나로 대체 (줄바꿈 대체 후에도 중복 공백이 생길 수 있으므로)
+    # 7. 줄바꿈 및 공백 정규화
+    #    두 개 이상의 줄바꿈은 단락 구분으로 유지
+    cleaned_text = re.sub(r'\n{2,}', '\n\n', cleaned_text)
+    #    단일 줄바꿈은 공백으로 처리 (긴 줄 방지 및 자연스러운 흐름)
+    cleaned_text = re.sub(r'\n', ' ', cleaned_text)
+    #    여러 공백을 하나로, 앞뒤 공백 제거
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-    return cleaned_text
 
+    return cleaned_text
