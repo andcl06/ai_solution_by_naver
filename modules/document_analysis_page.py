@@ -8,7 +8,7 @@ from datetime import datetime # 파일명에 타임스탬프를 위해 추가
 # --- 모듈 임포트 ---
 from modules import ai_service # AI 서비스 모듈
 from modules import document_processor # 새로 만든 문서 처리 모듈
-from modules import database_manager # 데이터베이스 관리 모듈 임포트 (새로 추가)
+from modules import database_manager # 데이터베이스 관리 모듈 임포트
 
 from langchain.memory import StreamlitChatMessageHistory # Langchain Streamlit 통합
 
@@ -31,6 +31,9 @@ def document_analysis_page():
         st.error("🚨 오류: Potens.dev API 키가 설정되지 않았습니다. .env 파일을 확인해주세요.")
         return # API 키 없으면 페이지 기능 비활성화
 
+    # 데이터베이스 초기화 (이 페이지에서 DB 작업을 수행하기 전에 확실히 테이블이 존재하도록 보장)
+    database_manager.init_db()
+
     # 세션 상태 초기화
     if "vectordb" not in st.session_state:
         st.session_state.vectordb = None
@@ -46,7 +49,12 @@ def document_analysis_page():
         st.session_state.generated_endorsement_sections = {}
     # 새로 추가: 생성된 특약의 전체 텍스트를 저장할 세션 상태 (이제 데이터베이스와 동기화)
     if 'generated_endorsement_full_text' not in st.session_state:
-        st.session_state['generated_endorsement_full_text'] = database_manager.get_latest_generated_endorsement() or "" # DB에서 불러오기
+        # 데이터베이스에서 불러오기 시도 (테이블이 존재하지 않을 경우를 대비하여 오류 처리)
+        try:
+            st.session_state['generated_endorsement_full_text'] = database_manager.get_latest_generated_endorsement() or ""
+        except Exception as e:
+            st.error(f"🚨 특약 데이터 로드 중 오류 발생: {e}. 데이터베이스 초기화가 필요할 수 있습니다.")
+            st.session_state['generated_endorsement_full_text'] = "" # 오류 발생 시 빈 문자열로 초기화
 
 
     with st.sidebar:
@@ -175,7 +183,7 @@ def document_analysis_page():
 
             st.session_state.generated_endorsement_sections = all_generated_sections # 세션 상태에 딕셔너리로 저장
             st.session_state['generated_endorsement_full_text'] = full_text_for_download # 새로 추가: 전체 특약 텍스트 세션 상태에 저장
-            database_manager.save_generated_endorsement(full_text_for_download) # 데이터베이스에 특약 저장 (새로 추가)
+            database_manager.save_generated_endorsement(full_text_for_download) # 데이터베이스에 특약 저장
             st.success("✅ 특약 생성 완료!")
             st.rerun() # 생성 완료 후 UI 업데이트를 위해 rerun
 
