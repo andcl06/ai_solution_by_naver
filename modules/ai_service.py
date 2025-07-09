@@ -16,10 +16,7 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
         return {"error": "Potens.dev API 키가 누락되었습니다."}
 
     potens_api_endpoint = "https://ai.potens.ai/api/chat"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    
     payload = {
         "prompt": prompt_message
     }
@@ -29,8 +26,20 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
             "responseSchema": response_schema
         }
 
+    # --- 변경된 부분: 페이로드를 명시적으로 UTF-8로 인코딩 ---
+    # Python 딕셔너리를 JSON 문자열로 변환하고, non-ASCII 문자를 이스케이프하지 않도록 설정
+    json_payload_str = json.dumps(payload, ensure_ascii=False)
+    # JSON 문자열을 UTF-8 바이트로 인코딩
+    encoded_payload = json_payload_str.encode('utf-8')
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json; charset=utf-8" # Content-Type 헤더에 charset 명시
+    }
+
     try:
-        response = requests.post(potens_api_endpoint, headers=headers, json=payload, timeout=300)
+        # 'json' 파라미터 대신 'data' 파라미터를 사용하여 미리 인코딩된 바이트 전송
+        response = requests.post(potens_api_endpoint, headers=headers, data=encoded_payload, timeout=300)
         response.raise_for_status()
         response_json = response.json()
 
@@ -52,7 +61,12 @@ def call_potens_api_raw(prompt_message: str, api_key: str, response_schema=None)
             error_message += f" Response content: {e.response.text}"
         return {"error": error_message}
     except json.JSONDecodeError:
-        return {"error": f"Potens.dev API 응답 JSON 디코딩 오류: {response.text}"}
+        # JSON 디코딩 오류 발생 시 원본 응답 텍스트를 포함하여 디버깅에 도움
+        try:
+            raw_response_text = response.text
+            return {"error": f"Potens.dev API 응답 JSON 디코딩 오류. Raw response: {raw_response_text[:500]}...", "raw_response": raw_response_text}
+        except Exception:
+            return {"error": f"Potens.dev API 응답 JSON 디코딩 오류: {e}"}
     except Exception as e:
         return {"error": f"알 수 없는 오류 발생: {e}"}
 
@@ -247,7 +261,11 @@ def clean_prettified_report_text(text: str) -> str:
         r'위 보고서는 제공된 정보를 바탕으로 재구성되었습니다[.:\s]*',
         r'이 보고서가 트렌드 분석 및 보험 상품 개발에 도움이 되기를 바랍니다[.:\s]*',
         r'이 보고서가 귀사의 비즈니스에 도움이 되기를 바랍니다[.:\s]*',
-        r'이 보고서는 제공된 초안을 바탕으로 작성되었습니다[.:\s]*'
+        r'이 보고서는 제공된 초안을 바탕으로 작성되었습니다[.:\s]*',
+        r'다음은 제공된 텍스트를 바탕으로 재구성된 뉴스 트렌드 요약입니다[.:\s]*', # 추가된 패턴
+        r'다음은 제공된 텍스트를 바탕으로 재구성된 자동차 보험 산업 관련 정보입니다[.:\s]*', # 추가된 패턴
+        r'뉴스 트렌드 요약:\s*', # 추가된 패턴
+        r'자동차 보험 산업 관련 주요 사실 및 법적 책임:\s*' # 추가된 패턴
     ]
     for pattern in patterns_to_remove:
         cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
@@ -261,31 +279,23 @@ def clean_prettified_report_text(text: str) -> str:
     return cleaned_text.strip()
 
 
-def get_prettified_report(raw_report_text: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
+def format_text_with_markdown(text_to_format: str, api_key: str, max_attempts: int = 2, delay_seconds: int = 15) -> str:
     """
-    Potens.dev AI를 호출하여 원본 보고서 텍스트를 바탕으로
-    더욱 보기 좋고 전문적인 형식의 보고서를 생성합니다.
+    Potens.dev AI를 호출하여 주어진 텍스트를 전문적이고 가독성 높은 마크다운 형식으로 포맷팅합니다.
     """
-    if not raw_report_text:
-        return "포맷팅할 보고서 내용이 없습니다."
+    if not text_to_format:
+        return "포맷팅할 내용이 없습니다."
 
     prompt = (
-        f"다음은 뉴스 트렌드 분석 및 보험 상품 개발 인사이트에 대한 보고서 초안입니다.\n"
-        f"이 초안의 내용을 유지하면서, 다음 지침에 따라 더욱 전문적이고 가독성 높은 보고서로 재구성해 주세요.\n"
-        f"특히, 텍스트 파일로 저장했을 때 줄바꿈과 들여쓰기가 명확하게 보이도록 마크다운 문법을 활용하여 구조화해 주세요.\n\n"
-        f"[지침]\n"
-        f"- 보고서의 시작은 '제목: [보고서 제목]'으로 시작하고, 그 아래 '개요:'를 포함해 주세요.\n"
-        f"- '주요 내용:' 섹션을 만들고, 그 안에 '트렌드 1:', '트렌드 2:' 와 같이 구체적인 트렌드를 명시하고 들여쓰기를 적용하여 설명해 주세요. (예: 'ㄴ트렌드 1: [내용]')\n"
-        f"- '자동차 보험 산업 관련 주요 사실 및 법적 책임' 섹션은 '보험 시사점:'으로 변경하고, 각 시사점을 목록 형태로 명확히 구분하여 작성해 주세요.\n"
-        f"- '부록' 섹션은 '키워드 산출 근거'와 '반영된 기사 리스트'를 포함하며, 각 항목은 표(테이블) 형태로 깔끔하게 정리해 주세요.\n"
-        f"- 문단 간의 간격을 적절히 조절하여 가독성을 높여 주세요. 각 문단은 최소 한 줄 이상 비워주세요.\n"
-        f"- 핵심 내용은 강조(예: 볼드체)하거나 목록 형태로 정리하여 시각적으로 돋보이게 해주세요.\n"
-        f"- 보고서의 전체적인 흐름이 자연스럽고 논리적으로 연결되도록 해주세요.\n"
-        f"- 불필요한 반복이나 비문은 수정하고, 전문적인 보고서 톤앤매너를 유지해 주세요.\n"
-        f"- 모든 내용은 한국어로 작성해 주세요.\n"
-        f"- **중요: 응답은 오직 재구성된 보고서 내용만 포함해야 합니다. 다른 설명이나 서두 문구는 절대 포함하지 마세요.**\n\n"
-        f"[보고서 초안]\n"
-        f"{raw_report_text}"
+        f"다음 텍스트를 전문적이고 가독성 높은 마크다운 형식으로 재구성해 주세요.\n"
+        f"텍스트 파일로 저장했을 때 줄바꿈과 들여쓰기가 명확하게 보이도록 마크다운 문법을 활용하여 구조화해 주세요.\n"
+        f"핵심 내용은 강조(예: 볼드체)하거나 목록 형태로 정리하여 시각적으로 돋보이게 해주세요.\n"
+        f"문단 간의 간격을 적절히 조절하여 가독성을 높여 주세요. 각 문단은 최소 한 줄 이상 비워주세요.\n"
+        f"불필요한 반복이나 비문은 수정하고, 전문적인 보고서 톤앤매너를 유지해 주세요.\n"
+        f"모든 내용은 한국어로 작성해 주세요.\n"
+        f"**중요: 응답은 오직 재구성된 내용만 포함해야 합니다. 다른 설명이나 서두 문구는 절대 포함하지 마세요.**\n\n"
+        f"[원본 텍스트]\n"
+        f"{text_to_format}"
     )
 
     response_dict = retry_ai_call(prompt, api_key=api_key, max_retries=max_attempts, delay_seconds=delay_seconds)
@@ -294,7 +304,6 @@ def get_prettified_report(raw_report_text: str, api_key: str, max_attempts: int 
         return clean_prettified_report_text(response_dict["text"])
     else:
         return response_dict.get("error", "AI를 통한 보고서 포맷팅 실패.")
-
 
 def clean_ai_response_text(text: str) -> str:
     """

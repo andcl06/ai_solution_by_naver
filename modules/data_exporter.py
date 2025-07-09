@@ -4,6 +4,7 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 import xlsxwriter # xlsxwriter 임포트 (Pandas의 to_excel 엔진으로 사용)
+import re # 정규 표현식을 위해 추가
 
 def export_articles_to_txt(articles_list: list[dict], file_prefix: str = "news_articles") -> str:
     """
@@ -96,6 +97,117 @@ def export_articles_to_excel(articles_df: pd.DataFrame, sheet_name: str = "Sheet
                 for col_idx in range(len(articles_df.columns)):
                     worksheet.write(row_num + 1, col_idx, articles_df.iloc[row_num, col_idx], cell_format)
 
+
+    output.seek(0)
+    return output
+
+def export_ai_report_to_excel(report_text: str, sheet_name: str = "AI Report") -> BytesIO:
+    """
+    AI가 생성한 마크다운 보고서 텍스트를 파싱하여 Excel 파일로 내보냅니다.
+    각 섹션을 별도의 행으로 구성하고, 셀 크기를 조정합니다.
+    """
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        # 수정된 부분: writer.sheets.add 대신 workbook.add_worksheet 사용
+        worksheet = workbook.add_worksheet(sheet_name) # 새로운 시트 추가
+
+        # 포맷 정의
+        title_format = workbook.add_format({
+            'bold': True,
+            'font_size': 16,
+            'text_wrap': True,
+            'valign': 'vcenter',
+            'align': 'center',
+            'fg_color': '#FFC000', # 주황색 배경
+            'border': 1
+        })
+        header_format = workbook.add_format({
+            'bold': True,
+            'font_size': 12,
+            'text_wrap': True,
+            'valign': 'vcenter',
+            'fg_color': '#D7E4BC', # 연한 녹색 배경
+            'border': 1
+        })
+        content_format = workbook.add_format({
+            'text_wrap': True,
+            'valign': 'top',
+            'border': 1
+        })
+        sub_header_format = workbook.add_format({
+            'bold': True,
+            'font_size': 11,
+            'text_wrap': True,
+            'valign': 'vcenter',
+            'fg_color': '#EBF1DE', # 더 연한 녹색
+            'border': 1
+        })
+        
+        # 열 너비 설정
+        worksheet.set_column('A:A', 30) # 섹션 제목 열
+        worksheet.set_column('B:B', 100) # 내용 열
+
+        row_idx = 0
+
+        # 전체 보고서 제목 추출 및 작성
+        overall_report_title_match = re.match(r'#\s*([^\n]+)', report_text)
+        overall_report_title = ""
+        if overall_report_title_match:
+            overall_report_title = overall_report_title_match.group(1).strip()
+            # 보고서 텍스트에서 전체 제목 줄 제거
+            report_text = report_text[len(overall_report_title_match.group(0)):].strip()
+        
+        if overall_report_title:
+            worksheet.merge_range(row_idx, 0, row_idx, 1, overall_report_title, title_format)
+            row_idx += 2 # 제목 후 두 줄 공백
+
+        # 주요 섹션(##)으로 보고서 텍스트 분할
+        # 이 정규식은 분할하면서 "## 헤더"도 결과에 포함시킵니다.
+        # 결과는 [첫 번째 헤더 이전 내용, ## 헤더1, 내용1, ## 헤더2, 내용2, ...] 형태가 됩니다.
+        parts = re.split(r'(##\s*[^\n]+)', report_text)
+
+        # 첫 번째 부분은 비어있거나 서론(예: "개요" 내용)을 포함할 수 있습니다.
+        current_content = parts[0].strip()
+        if current_content:
+            # 보고서 구조상, 메인 제목 다음의 첫 번째 내용 블록은 "개요"입니다.
+            worksheet.write(row_idx, 0, "개요", header_format)
+            worksheet.write(row_idx, 1, current_content, content_format)
+            row_idx += 2 # 섹션 후 한 줄 공백 추가
+
+        # 나머지 부분(헤더와 해당 내용) 처리
+        for i in range(1, len(parts), 2): # 헤더(홀수 인덱스부터 시작하여 두 칸씩 건너뛰기) 반복
+            header_line = parts[i].strip()
+            content_block = parts[i+1].strip() if (i+1) < len(parts) else ""
+
+            main_section_title = header_line.replace("##", "").strip()
+            
+            # 주요 섹션 제목과 해당 내용(하위 헤더 이전) 작성
+            worksheet.write(row_idx, 0, main_section_title, header_format)
+            
+            # 내용 블록을 하위 섹션(###)으로 분할
+            sub_parts = re.split(r'(###\s*[^\n]+)', content_block)
+            
+            # sub_parts의 첫 번째 요소는 첫 번째 하위 헤더 이전의 내용입니다.
+            initial_content_of_main_section = sub_parts[0].strip()
+            if initial_content_of_main_section:
+                worksheet.write(row_idx, 1, initial_content_of_main_section, content_format)
+            else:
+                worksheet.write(row_idx, 1, "", content_format) # 내용이 없어도 셀은 작성
+            row_idx += 1 # 하위 섹션이 있거나 다음 주요 섹션으로 이동
+
+            # 하위 섹션 처리
+            for j in range(1, len(sub_parts), 2): # 하위 헤더 반복
+                sub_header_line = sub_parts[j].strip()
+                sub_content_block = sub_parts[j+1].strip() if (j+1) < len(sub_parts) else ""
+
+                sub_section_title = sub_header_line.replace("###", "").strip()
+                
+                worksheet.write(row_idx, 0, f"  - {sub_section_title}", sub_header_format) # 하위 헤더 들여쓰기
+                worksheet.write(row_idx, 1, sub_content_block, content_format)
+                row_idx += 1
+            
+            row_idx += 1 # 각 주요 섹션(또는 마지막 하위 섹션) 후 한 줄 공백 추가하여 가독성 향상
 
     output.seek(0)
     return output

@@ -3,7 +3,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import time
-import re # 정규 표현식을 위해 추가
+import re
 import os
 import json
 import pandas as pd
@@ -16,24 +16,13 @@ from modules import database_manager
 from modules import news_crawler
 from modules import trend_analyzer
 from modules import data_exporter
-
-# --- 기존 보고서 포맷팅 함수 제거 (이제 AI가 담당) ---
-# def parse_and_format_report_for_display(report_text: str) -> str:
-#     """
-#     제공된 보고서 텍스트를 파싱하고 재구성하여 다운로드용 마크다운 형식으로 반환합니다.
-#     (이 함수는 화면 표시가 아닌 파일 다운로드 시 사용됩니다.)
-#     """
-#     formatted_output = []
-#     # ... (기존 포맷팅 로직 제거)
-#     return "\n".join(formatted_output)
-
+from modules import email_sender
 
 # --- 페이지 함수 정의 ---
 def trend_analysis_page():
     """
     최신 뉴스 기반 트렌드 분석 및 보고서 생성을 수행하는 페이지입니다.
     """
-    # Streamlit 페이지 설정은 main_app.py에서 하므로 여기서는 제거
     st.title("📰 뉴스 트렌드 분석기")
     st.markdown("원하는 키워드로 네이버 뉴스 트렌드를 감지하고, AI가 요약한 기사 내용을 확인하세요.")
 
@@ -44,39 +33,61 @@ def trend_analysis_page():
     st.markdown("---") # 버튼 아래 구분선 추가
 
     # --- Potens.dev AI API 키 설정 ---
-    # main_app.py에서 이미 load_dotenv()를 호출했으므로, 여기서는 os.getenv로 바로 접근
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
     if not POTENS_API_KEY:
         st.error("🚨 오류: .env 파일에 'POTENS_API_KEY'가 설정되지 않았습니다. Potens.dev AI 기능을 사용할 수 없습니다.")
-        # API 키가 없으면 더 이상 진행하지 않도록 return
         return
 
-    # 데이터베이스 초기화 (앱 시작 시 main_app에서 이미 호출될 수 있으나, 페이지 진입 시 재확인)
+    # --- 이메일 설정 정보 로드 ---
+    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+    SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
+    RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+    SMTP_SERVER = os.getenv("SMTP_SERVER")
+    SMTP_PORT = os.getenv("SMTP_PORT")
+
+    if not all([SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL, SMTP_SERVER, SMTP_PORT]):
+        st.warning("⚠️ 이메일 전송 기능 활성화를 위해 .env 파일에 SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL, SMTP_SERVER, SMTP_PORT를 설정해주세요.")
+        email_config_ok = False
+    else:
+        email_config_ok = True
+        try:
+            SMTP_PORT = int(SMTP_PORT)
+        except ValueError:
+            st.error("🚨 오류: SMTP_PORT는 유효한 숫자여야 합니다.")
+            email_config_ok = False
+
+
+    # 데이터베이스 초기화
     database_manager.init_db()
 
     # --- Streamlit Session State 초기화 (페이지 진입 시 필요한 경우) ---
-    # 각 페이지는 자신의 세션 상태 변수를 명확히 관리하는 것이 좋습니다.
-    # main_app.py에서 공통 변수는 초기화했지만, 페이지별 변수는 여기서 초기화합니다.
     if 'trending_keywords_data' not in st.session_state:
         st.session_state['trending_keywords_data'] = []
     if 'displayed_keywords' not in st.session_state:
         st.session_state['displayed_keywords'] = []
     if 'final_collected_articles' not in st.session_state:
         st.session_state['final_collected_articles'] = []
-    if 'ai_insights_summary' not in st.session_state: # 원본 보고서 텍스트 (다운로드용)
+    if 'ai_insights_summary' not in st.session_state:
         st.session_state['ai_insights_summary'] = ""
     if 'ai_trend_summary' not in st.session_state:
         st.session_state['ai_trend_summary'] = ""
     if 'ai_insurance_info' not in st.session_state:
         st.session_state['ai_insurance_info'] = ""
-    # 새로 추가: db_status_message와 db_status_type 초기화
     if 'db_status_message' not in st.session_state:
         st.session_state['db_status_message'] = ""
     if 'db_status_type' not in st.session_state:
         st.session_state['db_status_type'] = ""
-    if 'prettified_report_for_download' not in st.session_state: # AI가 포맷한 보고서 저장
+    if 'prettified_report_for_download' not in st.session_state:
         st.session_state['prettified_report_for_download'] = ""
+    if 'formatted_trend_summary' not in st.session_state:
+        st.session_state['formatted_trend_summary'] = ""
+    if 'formatted_insurance_info' not in st.session_state:
+        st.session_state['formatted_insurance_info'] = ""
+    if 'email_status_message' not in st.session_state:
+        st.session_state['email_status_message'] = ""
+    if 'email_status_type' not in st.session_state:
+        st.session_state['email_status_type'] = ""
 
 
     # --- UI 레이아웃: 검색 조건 (좌) & 키워드 트렌드 결과 (우) ---
@@ -107,12 +118,16 @@ def trend_analysis_page():
             st.session_state['ai_insights_summary'] = ""
             st.session_state['ai_trend_summary'] = ""
             st.session_state['ai_insurance_info'] = ""
-            st.session_state['prettified_report_for_download'] = "" # AI 포맷 보고서도 초기화
+            st.session_state['prettified_report_for_download'] = ""
+            st.session_state['formatted_trend_summary'] = ""
+            st.session_state['formatted_insurance_info'] = ""
+            st.session_state['email_status_message'] = ""
+            st.session_state['email_status_type'] = ""
 
             st.session_state['submitted_flag'] = True
             st.session_state['analysis_completed'] = False
-            st.session_state['db_status_message'] = "" # 제출 시에도 초기화
-            st.session_state['db_status_type'] = ""     # 제출 시에도 초기화
+            st.session_state['db_status_message'] = ""
+            st.session_state['db_status_type'] = ""
 
             table_placeholder.empty()
             my_bar = status_message_placeholder.progress(0, text="데이터 수집 및 분석 진행 중...")
@@ -269,13 +284,11 @@ def trend_analysis_page():
                             # --- 4. AI가 트렌드 요약 및 보험 상품 개발 인사이트 도출 (분리된 호출) ---
                             status_message_placeholder.info("AI가 트렌드 요약 및 보험 상품 개발 인사이트를 도출 중 (분리된 호출)...")
 
-                            # AI에게 전달할 요약된 기사 목록 (전체 기사 요약본을 전달)
-                            articles_for_ai_insight_generation = st.session_state['final_collected_articles'] # 모든 요약 기사 전달
+                            articles_for_ai_insight_generation = st.session_state['final_collected_articles']
 
-                            # 트렌드 요약 호출
                             with st.spinner("AI가 뉴스 트렌드를 요약 중..."):
                                 trend_summary = ai_service.get_overall_trend_summary(
-                                    articles_for_ai_insight_generation, # 전체 요약 기사 목록 전달
+                                    articles_for_ai_insight_generation,
                                     POTENS_API_KEY
                                 )
                                 st.session_state['ai_trend_summary'] = ai_service.clean_ai_response_text(trend_summary)
@@ -285,91 +298,100 @@ def trend_analysis_page():
                                     status_message_placeholder.error(f"AI 트렌드 요약 실패: {st.session_state['ai_trend_summary']}")
                                 else:
                                     status_message_placeholder.success("AI 뉴스 트렌드 요약 완료!")
-                                time.sleep(1) # 다음 UI 업데이트 전 잠시 대기
+                                time.sleep(1)
 
-                            # 보험 관련 정보 호출
                             with st.spinner("AI가 자동차 보험 산업 관련 정보를 분석 중..."):
                                 insurance_info = ai_service.get_insurance_implications_from_ai(
-                                    st.session_state['ai_trend_summary'], # 변경된 부분: 트렌드 요약문 전달
+                                    st.session_state['ai_trend_summary'],
                                     POTENS_API_KEY
                                 )
                                 st.session_state['ai_insurance_info'] = ai_service.clean_ai_response_text(insurance_info)
                                 if st.session_state['ai_insurance_info'].startswith("요약된 기사가 없어") or \
                                    st.session_state['ai_insurance_info'].startswith("Potens.dev AI 호출 최종 실패") or \
                                    st.session_state['ai_insurance_info'].startswith("Potens.dev AI 호출에서 유효한 응답을 받지 못했습니다.") or \
-                                   st.session_state['ai_insurance_info'].startswith("트렌드 요약문이 없어"): # 트렌드 요약문이 없는 경우도 실패
+                                   st.session_state['ai_insurance_info'].startswith("트렌드 요약문이 없어"):
                                     status_message_placeholder.error(f"AI 자동차 보험 산업 관련 정보 분석 실패: {st.session_state['ai_insurance_info']}")
                                 else:
                                     status_message_placeholder.success("AI 자동차 보험 산업 관련 정보 분석 완료!")
-                                time.sleep(1) # 다음 UI 업데이트 전 잠시 대기
+                                time.sleep(1)
 
-                            # 두 결과를 합쳐서 최종 인사이트 요약 생성 (다운로드용 원본 텍스트)
-                            final_insights_text_raw = ""
-                            if st.session_state['ai_trend_summary'] and \
-                               not st.session_state['ai_trend_summary'].startswith("AI 호출 최종 실패"):
-                                final_insights_text_raw += "### 뉴스 트렌드 요약\n"
-                                final_insights_text_raw += st.session_state['ai_trend_summary'] + "\n\n"
+                            # --- 5. AI가 각 섹션별로 포맷팅 (부하 분산) ---
+                            with st.spinner("AI가 뉴스 트렌드 요약 보고서를 포맷팅 중..."):
+                                formatted_trend_summary = ai_service.format_text_with_markdown(
+                                    st.session_state['ai_trend_summary'],
+                                    POTENS_API_KEY
+                                )
+                                st.session_state['formatted_trend_summary'] = formatted_trend_summary
+                                if formatted_trend_summary.startswith("AI를 통한 보고서 포맷팅 실패"):
+                                    status_message_placeholder.warning("AI 뉴스 트렌드 요약 포맷팅에 실패했습니다. 원본 텍스트가 사용됩니다.")
+                                    st.session_state['formatted_trend_summary'] = st.session_state['ai_trend_summary']
+                                else:
+                                    status_message_placeholder.success("AI 뉴스 트렌드 요약 보고서 포맷팅 완료!")
+                                time.sleep(1)
+
+                            with st.spinner("AI가 자동차 보험 산업 관련 정보 보고서를 포맷팅 중..."):
+                                formatted_insurance_info = ai_service.format_text_with_markdown(
+                                    st.session_state['ai_insurance_info'],
+                                    POTENS_API_KEY
+                                )
+                                st.session_state['formatted_insurance_info'] = formatted_insurance_info
+                                if formatted_insurance_info.startswith("AI를 통한 보고서 포맷팅 실패"):
+                                    status_message_placeholder.warning("AI 자동차 보험 산업 관련 정보 포맷팅에 실패했습니다. 원본 텍스트가 사용됩니다.")
+                                    st.session_state['formatted_insurance_info'] = st.session_state['ai_insurance_info']
+                                else:
+                                    status_message_placeholder.success("AI 자동차 보험 산업 관련 정보 보고서 포맷팅 완료!")
+                                time.sleep(1)
+
+                            # --- 6. 최종 보고서 결합 (AI 포맷팅 + 직접 구성 부록) ---
+                            final_prettified_report = ""
+                            final_prettified_report += "# 뉴스 트렌드 분석 및 보험 상품 개발 인사이트\n\n"
+                            final_prettified_report += "## 개요\n\n"
+                            final_prettified_report += "이 보고서는 최근 뉴스 트렌드를 분석하고, 이를 바탕으로 자동차 보험 상품 개발에 필요한 주요 인사이트를 제공합니다.\n\n"
+
+                            if st.session_state['formatted_trend_summary']:
+                                final_prettified_report += "## 뉴스 트렌드 요약\n"
+                                final_prettified_report += st.session_state['formatted_trend_summary'] + "\n\n"
                             else:
-                                final_insights_text_raw += "### 뉴스 트렌드 요약 (생성 실패)\n"
-                                final_insights_text_raw += st.session_state['ai_trend_summary'] + "\n\n"
+                                final_prettified_report += "## 뉴스 트렌드 요약 (생성 실패)\n"
+                                final_prettified_report += st.session_state['ai_trend_summary'] + "\n\n"
 
-                            if st.session_state['ai_insurance_info'] and \
-                               not st.session_state['ai_insurance_info'].startswith("AI 호출 최종 실패") and \
-                               not st.session_state['ai_insurance_info'].startswith("트렌드 요약문이 없어"): # 트렌드 요약문이 없는 경우도 실패
-                                final_insights_text_raw += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임\n"
-                                final_insights_text_raw += st.session_state['ai_insurance_info'] + "\n"
+                            if st.session_state['formatted_insurance_info']:
+                                final_prettified_report += "## 자동차 보험 산업 관련 주요 사실 및 법적 책임\n"
+                                final_prettified_report += st.session_state['formatted_insurance_info'] + "\n\n"
                             else:
-                                final_insights_text_raw += "### 자동차 보험 산업 관련 주요 사실 및 법적 책임 (생성 실패)\n"
-                                final_insights_text_raw += st.session_state['ai_insurance_info'] + "\n"
+                                final_prettified_report += "## 자동차 보험 산업 관련 주요 사실 및 법적 책임 (생성 실패)\n"
+                                final_prettified_report += st.session_state['ai_insurance_info'] + "\n\n"
 
-                            # --- 부록 섹션 추가 ---
-                            final_insights_text_raw += "\n---\n\n"
-                            final_insights_text_raw += "## 부록\n\n"
+                            # --- 부록 섹션 추가 (AI 포맷팅 없이 직접 구성) ---
+                            final_prettified_report += "---\n\n"
+                            final_prettified_report += "## 부록\n\n"
 
-                            # 키워드 산출 근거 추가
-                            final_insights_text_raw += "### 키워드 산출 근거\n"
+                            final_prettified_report += "### 키워드 산출 근거\n"
                             if st.session_state['displayed_keywords']:
                                 for kw_data in st.session_state['displayed_keywords']:
-                                    # f-string 문법 오류 수정
                                     surge_ratio_display = (f'''{kw_data.get('surge_ratio'):.2f}x''' if kw_data.get('surge_ratio') != float('inf') else '새로운 트렌드')
-                                    final_insights_text_raw += (
+                                    final_prettified_report += (
                                         f"- **키워드**: {kw_data['keyword']}\n"
                                         f"  - 최근 언급량: {kw_data['recent_freq']}회\n"
                                         f"  - 이전 언급량: {kw_data['past_freq']}회\n"
-                                        f"  - 증가율: {surge_ratio_display}\n"
+                                        f"  - 증가율: {surge_ratio_display}\n\n"
                                     )
                             else:
-                                final_insights_text_raw += "키워드 산출 근거 데이터가 없습니다.\n"
-                            final_insights_text_raw += "\n"
+                                final_prettified_report += "키워드 산출 근거 데이터가 없습니다.\n\n"
 
-                            # 반영된 기사 리스트 추가 (배치 요약 대신 원본 기사 정보 나열)
-                            final_insights_text_raw += "### 반영된 기사 리스트\n"
+                            final_prettified_report += "### 반영된 기사 리스트\n"
                             if st.session_state['final_collected_articles']:
                                 for i, article in enumerate(st.session_state['final_collected_articles']):
-                                    final_insights_text_raw += (
+                                    final_prettified_report += (
                                         f"{i+1}. **제목**: {article['제목']}\n"
-                                        f"   **날짜**: {article['날짜']}\n" # 오타 수정
+                                        f"   **날짜**: {article['날짜']}\n"
                                         f"   **링크**: {article['링크']}\n"
-                                        f"   **요약 내용**: {article['내용'][:100]}...\n" # 요약 내용의 일부만 표시
+                                        f"   **요약 내용**: {article['내용'][:150]}...\n\n"
                                     )
-                                final_insights_text_raw += "\n"
                             else:
-                                final_insights_text_raw += "반영된 기사 리스트가 없습니다.\n"
+                                final_prettified_report += "반영된 기사 리스트가 없습니다.\n\n"
 
-                            st.session_state['ai_insights_summary'] = final_insights_text_raw
-                            
-                            # 새로 추가: AI에게 포맷팅 요청
-                            with st.spinner("AI가 보고서 최종 포맷팅 중..."):
-                                prettified_report = ai_service.get_prettified_report(
-                                    st.session_state['ai_insights_summary'],
-                                    POTENS_API_KEY
-                                )
-                                # AI가 포맷팅에 실패한 경우 원본 텍스트라도 사용
-                                if prettified_report.startswith("AI를 통한 보고서 포맷팅 실패"):
-                                    st.session_state['prettified_report_for_download'] = st.session_state['ai_insights_summary']
-                                    status_message_placeholder.warning("AI 보고서 포맷팅에 실패했습니다. 원본 텍스트로 다운로드됩니다.")
-                                else:
-                                    st.session_state['prettified_report_for_download'] = prettified_report
+                            st.session_state['prettified_report_for_download'] = final_prettified_report
 
 
                         else:
@@ -380,7 +402,7 @@ def trend_analysis_page():
 
             st.session_state['submitted_flag'] = False
             st.session_state['analysis_completed'] = True
-            st.rerun() # 분석 완료 후 UI 업데이트를 위해 rerun
+            st.rerun()
 
         # --- 결과가 이미 세션 상태에 있는 경우 표시 ---
         if not st.session_state.get('submitted_flag', False) and \
@@ -399,7 +421,6 @@ def trend_analysis_page():
                     )
             else:
                 st.info("선택된 기간 내에 유의미한 트렌드 키워드가 식별되지 않았습니다.")
-        # --- 초기 로드 시 메시지 ---
         elif not st.session_state.get('submitted_flag', False) and \
              not st.session_state.get('analysis_completed', False):
             empty_df = pd.DataFrame(columns=['keyword', 'recent_freq', 'past_freq', 'surge_ratio'])
@@ -412,7 +433,6 @@ def trend_analysis_page():
     all_db_articles = database_manager.get_all_articles()
 
     if all_db_articles:
-        # 변수 초기화
         txt_data_all_crawled = ""
         excel_data_all_crawled = None
         txt_data_ai_summaries = ""
@@ -443,29 +463,20 @@ def trend_analysis_page():
         if not df_ai_summaries.empty:
             excel_data_ai_summaries = data_exporter.export_articles_to_excel(df_ai_summaries, sheet_name='AI_Summaries')
 
-        # 변경된 부분: TXT 다운로드 시 AI가 포맷한 보고서 사용
         if st.session_state['prettified_report_for_download']:
             txt_data_ai_insights = st.session_state['prettified_report_for_download']
-        elif st.session_state['ai_insights_summary']: # AI 포맷팅 실패 시 원본이라도 제공
-            txt_data_ai_insights = st.session_state['ai_insights_summary']
         else:
             txt_data_ai_insights = "AI 트렌드 요약 및 보험 상품 개발 인사이트가 없습니다."
 
 
-        if st.session_state['ai_insights_summary']:
-            # AI 인사이트 엑셀 다운로드용 DataFrame (원본 구조 기반)
-            # 이 DataFrame의 내용은 이미 AI가 생성한 원본 텍스트를 기반으로 하며,
-            # data_exporter.export_articles_to_excel에서 xlsxwriter를 통해 스타일링이 적용됨.
-            ai_insights_df = pd.DataFrame({
-                '보고서 섹션': ['뉴스 트렌드 요약', '자동차 보험 산업 관련 주요 사실 및 법적 책임', '키워드 산출 근거', '반영된 기사 리스트'],
-                '내용': [
-                    st.session_state['ai_trend_summary'],
-                    st.session_state['ai_insurance_info'],
-                    "\n".join([f"- {kw_data['keyword']}: 최근 {kw_data['recent_freq']}회, 이전 {kw_data['past_freq']}회, 증가율 {f'''{kw_data.get('surge_ratio'):.2f}x''' if kw_data.get('surge_ratio') != float('inf') else '새로운 트렌드'}" for kw_data in st.session_state['displayed_keywords']]),
-                    "\n".join([f"{i+1}. 제목: {art['제목']}\n날짜: {art['날짜']}\n링크: {art['링크']}\n요약 내용: {art['내용'][:100]}..." for i, art in enumerate(st.session_state['final_collected_articles'])])
-                ]
-            })
-            excel_data_ai_insights = data_exporter.export_articles_to_excel(ai_insights_df, sheet_name='AI_Insights_Report')
+        if st.session_state['prettified_report_for_download']:
+            # 변경된 부분: 새로운 export_ai_report_to_excel 함수 호출
+            excel_data_ai_insights = data_exporter.export_ai_report_to_excel(
+                st.session_state['prettified_report_for_download'],
+                sheet_name='AI_Insights_Report'
+            )
+        else:
+            excel_data_ai_insights = None # 보고서 내용이 없으면 엑셀 데이터도 없음
 
 
         st.markdown("### 📊 수집된 전체 뉴스 데이터")
@@ -516,13 +527,13 @@ def trend_analysis_page():
         else:
             st.info("AI 요약된 트렌드 기사가 없습니다. 먼저 분석을 실행하여 요약된 기사를 생성하세요.")
 
-        if st.session_state['ai_insights_summary']:
+        if st.session_state['prettified_report_for_download']:
             st.markdown("### 💡 AI 트렌드 요약 및 보험 상품 개발 인사이트")
-            col_ai_insights_txt, col_ai_insights_excel = st.columns([0.1, 0.9])
+            col_ai_insights_txt, col_ai_insights_excel, col_ai_insights_email = st.columns([0.1, 0.4, 0.5])
             with col_ai_insights_txt:
                 st.download_button(
                     label="📄 TXT 다운로드",
-                    data=txt_data_ai_insights, # 이제 이 변수에 AI가 포맷한 내용이 들어갑니다.
+                    data=txt_data_ai_insights,
                     file_name=data_exporter.generate_filename("ai_insights_report", "txt"),
                     mime="text/plain",
                     help="AI가 도출한 트렌드 요약 및 보험 상품 개발 인사이트 보고서를 텍스트 파일로 다운로드합니다."
@@ -538,6 +549,52 @@ def trend_analysis_page():
                     )
                 else:
                     st.info("AI 인사이트 엑셀 다운로드 데이터가 없습니다.")
+            with col_ai_insights_email:
+                if st.button("📧 보고서 이메일 전송", help="생성된 보고서를 이메일로 전송합니다."):
+                    if email_config_ok:
+                        with st.spinner("이메일 전송 중..."):
+                            email_subject = f"뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
+                            email_body = st.session_state['prettified_report_for_download']
+
+                            attachment_data_for_email = None
+                            attachment_filename_for_email = None
+                            if excel_data_ai_insights:
+                                attachment_data_for_email = excel_data_ai_insights.getvalue()
+                                attachment_filename_for_email = data_exporter.generate_filename("ai_insights_report", "xlsx")
+
+                            success = email_sender.send_email_with_report(
+                                sender_email=SENDER_EMAIL,
+                                sender_password=SENDER_PASSWORD,
+                                receiver_email=RECEIVER_EMAIL,
+                                smtp_server=SMTP_SERVER,
+                                smtp_port=SMTP_PORT,
+                                subject=email_subject,
+                                body=email_body,
+                                attachment_data=attachment_data_for_email,
+                                attachment_filename=attachment_filename_for_email,
+                                report_format="markdown"
+                            )
+                            if success:
+                                st.session_state['email_status_message'] = "이메일이 성공적으로 전송되었습니다!"
+                                st.session_state['email_status_type'] = "success"
+                            else:
+                                st.session_state['email_status_message'] = "이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
+                                st.session_state['email_status_type'] = "error"
+                            st.rerun()
+                    else:
+                        st.session_state['email_status_message'] = "이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
+                        st.session_state['email_status_type'] = "error"
+                        st.rerun()
+
+            if st.session_state['email_status_message']:
+                if st.session_state['email_status_type'] == "success":
+                    st.success(st.session_state['email_status_message'])
+                elif st.session_state['email_status_type'] == "error":
+                    st.error(st.session_state['email_status_message'])
+                st.session_state['email_status_message'] = ""
+                st.session_state['email_status_type'] = ""
+
+
         else:
             st.info("AI 트렌드 요약 및 보험 상품 개발 인사이트가 없습니다. 분석을 실행하여 생성하세요.")
 
@@ -565,6 +622,9 @@ def trend_analysis_page():
                 st.session_state['ai_insurance_info'] = ""
                 st.session_state['submitted_flag'] = False
                 st.session_state['analysis_completed'] = False
-                st.session_state['prettified_report_for_download'] = "" # DB 초기화 시 AI 포맷 보고서도 초기화
+                st.session_state['prettified_report_for_download'] = ""
+                st.session_state['formatted_trend_summary'] = ""
+                st.session_state['formatted_insurance_info'] = ""
+                st.session_state['email_status_message'] = ""
+                st.session_state['email_status_type'] = ""
                 st.rerun()
-
