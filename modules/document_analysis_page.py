@@ -8,6 +8,7 @@ from datetime import datetime # 파일명에 타임스탬프를 위해 추가
 # --- 모듈 임포트 ---
 from modules import ai_service # AI 서비스 모듈
 from modules import document_processor # 새로 만든 문서 처리 모듈
+from modules import database_manager # 데이터베이스 관리 모듈 임포트 (새로 추가)
 
 from langchain.memory import StreamlitChatMessageHistory # Langchain Streamlit 통합
 
@@ -43,6 +44,9 @@ def document_analysis_page():
     # 'generated_endorsement_text' 대신 'generated_endorsement_sections'로 변경하여 각 섹션별로 저장
     if 'generated_endorsement_sections' not in st.session_state:
         st.session_state.generated_endorsement_sections = {}
+    # 새로 추가: 생성된 특약의 전체 텍스트를 저장할 세션 상태 (이제 데이터베이스와 동기화)
+    if 'generated_endorsement_full_text' not in st.session_state:
+        st.session_state['generated_endorsement_full_text'] = database_manager.get_latest_generated_endorsement() or "" # DB에서 불러오기
 
 
     with st.sidebar:
@@ -67,6 +71,8 @@ def document_analysis_page():
                 "content": "문서 분석이 완료되었습니다. 이제 질문하거나 특약을 생성할 수 있습니다."
             }]
             st.session_state.generated_endorsement_sections = {} # 문서 처리 시 특약 초기화
+            st.session_state['generated_endorsement_full_text'] = "" # 특약 전체 텍스트 초기화 (DB에도 반영 필요)
+            database_manager.save_generated_endorsement("") # DB에서도 특약 초기화
             st.rerun()
 
 
@@ -138,7 +144,7 @@ def document_analysis_page():
 
         if st.button("🚀 특약 생성 시작"):
             all_generated_sections = {} # 각 섹션별 답변을 저장할 딕셔너리
-            full_text_for_download = "" # 다운로드용 전체 텍스트
+            full_text_for_download = "" # 다운로드용 전체 텍스트 (이제 세션 상태에도 저장)
 
             with st.spinner("Potens API에 순차적으로 요청 중입니다..."):
                 for title, question in sections.items():
@@ -168,6 +174,8 @@ def document_analysis_page():
                     full_text_for_download += f"#### {title}\n{answer.strip()}\n\n" # 다운로드용 텍스트에 추가
 
             st.session_state.generated_endorsement_sections = all_generated_sections # 세션 상태에 딕셔너리로 저장
+            st.session_state['generated_endorsement_full_text'] = full_text_for_download # 새로 추가: 전체 특약 텍스트 세션 상태에 저장
+            database_manager.save_generated_endorsement(full_text_for_download) # 데이터베이스에 특약 저장 (새로 추가)
             st.success("✅ 특약 생성 완료!")
             st.rerun() # 생성 완료 후 UI 업데이트를 위해 rerun
 
@@ -188,4 +196,3 @@ def document_analysis_page():
                 file_name=f"생성된_보험_특약_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt", # 파일명에 타임스탬프 추가
                 mime="text/plain"
             )
-

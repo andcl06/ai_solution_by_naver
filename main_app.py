@@ -13,24 +13,13 @@ from loguru import logger # 로깅을 위해 필요
 from modules.landing_page import landing_page
 from modules.trend_analysis_page import trend_analysis_page
 from modules.document_analysis_page import document_analysis_page
+from modules.report_automation_page import report_automation_page # 새로 추가: 보고서 자동화 페이지
 
 
 # --- 환경 변수 로드 (앱 시작 시 한 번만) ---
 load_dotenv()
 POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
-
-# --- 사용자 DB (로그인 기능 제거로 더 이상 필요 없음) ---
-# USER_DB = {
-#     "admin": "1234",
-#     "guest": "abcd",
-#     "user" : "qwer",
-#     "localai" : "asdf"
-# }
-
-# --- 로그인 페이지 (제거) ---
-# def login_page():
-#     ...
 
 # --- 메인 애플리케이션 라우팅 ---
 def main_app():
@@ -42,9 +31,6 @@ def main_app():
     st.set_page_config(layout="wide", page_title="트렌드 기반 특약생성 솔루션") # 앱 이름 변경
 
     # 세션 상태 초기화 (앱이 처음 로드될 때만 실행)
-    # 로그인 관련 세션 상태 제거
-    # if "logged_in" not in st.session_state:
-    #     st.session_state.logged_in = False
     if "username" not in st.session_state: # 사용자 이름은 환영 메시지를 위해 유지
         st.session_state.username = "사용자" # 기본 사용자 이름 설정 (로그인 제거)
     if "page" not in st.session_state:
@@ -57,9 +43,12 @@ def main_app():
         trend_analysis_page() # modules/trend_analysis_page.py의 함수 호출
     elif st.session_state.page == "document":
         document_analysis_page() # modules/document_analysis_page.py의 함수 호출
+    elif st.session_state.page == "automation": # 새로 추가: 자동화 페이지 라우팅
+        report_automation_page() # modules/report_automation_page.py의 함수 호출
     else:
         st.session_state.page = "landing" # 알 수 없는 페이지 상태일 경우 랜딩 페이지로 리다이렉트
 
 
 if __name__ == "__main__":
     main_app()
+

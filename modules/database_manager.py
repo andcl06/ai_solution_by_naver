@@ -21,6 +21,37 @@ def init_db():
             crawl_timestamp TEXT NOT NULL
         )
     ''')
+    # 새로운 테이블 추가: 검색 프로필 저장
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_name TEXT UNIQUE NOT NULL,
+            keyword TEXT NOT NULL,
+            total_search_days INTEGER NOT NULL,
+            recent_trend_days INTEGER NOT NULL,
+            max_naver_search_pages_per_day INTEGER NOT NULL
+        )
+    ''')
+    # 새로운 테이블 추가: 예약된 작업 저장 (schedule_day 컬럼 추가)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            schedule_time TEXT NOT NULL, -- "HH:MM" 형식
+            schedule_day TEXT NOT NULL, -- "매일", "월요일", "화요일" 등
+            recipient_emails TEXT NOT NULL, -- 콤마로 구분된 이메일 주소
+            last_run_date TEXT, -- 마지막 실행 날짜 (YYYY-MM-DD)
+            FOREIGN KEY (profile_id) REFERENCES search_profiles(id) ON DELETE CASCADE
+        )
+    ''')
+    # 새 테이블 추가: 생성된 특약 저장 (가장 최신 특약만 저장)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS generated_endorsements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            endorsement_text TEXT NOT NULL,
+            generation_timestamp TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -54,9 +85,6 @@ def clear_db_content():
     try:
         c.execute("DELETE FROM articles")
         conn.commit()
-        # Streamlit session_state를 직접 업데이트하는 대신, 반환 값으로 상태를 전달하거나
-        # 별도의 로깅/메시징 시스템을 사용하는 것이 더 모듈화된 방식이지만,
-        # 현재 Streamlit 앱과의 통합을 위해 임시로 유지합니다.
         st.session_state['db_status_message'] = "데이터베이스의 모든 기록이 성공적으로 삭제되었습니다."
         st.session_state['db_status_type'] = "success"
     except Exception as e:
@@ -64,3 +92,153 @@ def clear_db_content():
         st.session_state['db_status_type'] = "error"
     finally:
         conn.close()
+
+# --- 검색 프로필 관련 함수 ---
+def save_search_profile(profile_name: str, keyword: str, total_search_days: int, recent_trend_days: int, max_naver_search_pages_per_day: int):
+    """검색 프로필을 저장하거나 업데이트합니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT OR REPLACE INTO search_profiles (profile_name, keyword, total_search_days, recent_trend_days, max_naver_search_pages_per_day) VALUES (?, ?, ?, ?, ?)",
+                  (profile_name, keyword, total_search_days, recent_trend_days, max_naver_search_pages_per_day))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 검색 프로필 저장/업데이트 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_search_profiles() -> list[dict]:
+    """저장된 모든 검색 프로필을 가져옵니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT id, profile_name, keyword, total_search_days, recent_trend_days, max_naver_search_pages_per_day FROM search_profiles ORDER BY profile_name")
+    profiles = c.fetchall()
+    conn.close()
+    
+    profile_list = []
+    for p in profiles:
+        profile_list.append({
+            "id": p[0],
+            "profile_name": p[1],
+            "keyword": p[2],
+            "total_search_days": p[3],
+            "recent_trend_days": p[4],
+            "max_naver_search_pages_per_day": p[5]
+        })
+    return profile_list
+
+def delete_search_profile(profile_id: int):
+    """지정된 ID의 검색 프로필을 삭제합니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM search_profiles WHERE id = ?", (profile_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 검색 프로필 삭제 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+# --- 예약 작업 관련 함수 ---
+def save_scheduled_task(profile_id: int, schedule_time: str, schedule_day: str, recipient_emails: str): # schedule_day 추가
+    """예약된 작업을 저장하거나 업데이트합니다. (단일 예약만 가능하도록 구현)"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        # 기존 예약 삭제 후 새로 삽입 (단일 예약만 허용)
+        c.execute("DELETE FROM scheduled_tasks")
+        c.execute("INSERT INTO scheduled_tasks (profile_id, schedule_time, schedule_day, recipient_emails, last_run_date) VALUES (?, ?, ?, ?, ?)", # schedule_day 추가
+                  (profile_id, schedule_time, schedule_day, recipient_emails, None)) # 초기 last_run_date는 None
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 예약 작업 저장 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_scheduled_task() -> dict | None:
+    """현재 예약된 작업을 가져옵니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT id, profile_id, schedule_time, schedule_day, recipient_emails, last_run_date FROM scheduled_tasks LIMIT 1") # schedule_day 추가
+    task = c.fetchone()
+    conn.close()
+    
+    if task:
+        return {
+            "id": task[0],
+            "profile_id": task[1],
+            "schedule_time": task[2],
+            "schedule_day": task[3], # schedule_day 추가
+            "recipient_emails": task[4],
+            "last_run_date": task[5]
+        }
+    return None
+
+def update_scheduled_task_last_run_date(task_id: int, run_date: str):
+    """예약된 작업의 마지막 실행 날짜를 업데이트합니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE scheduled_tasks SET last_run_date = ? WHERE id = ?", (run_date, task_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 예약 작업 마지막 실행 날짜 업데이트 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+def clear_scheduled_task():
+    """예약된 작업을 삭제합니다."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM scheduled_tasks")
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 예약 작업 삭제 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+# --- 생성된 특약 관련 함수 (새로 추가) ---
+def save_generated_endorsement(endorsement_text: str):
+    """
+    생성된 특약 텍스트를 데이터베이스에 저장합니다.
+    항상 가장 최신 특약만 유지합니다 (기존 특약 삭제 후 새로 삽입).
+    """
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        # 기존 특약 삭제
+        c.execute("DELETE FROM generated_endorsements")
+        # 새 특약 삽입
+        c.execute("INSERT INTO generated_endorsements (endorsement_text, generation_timestamp) VALUES (?, ?)",
+                  (endorsement_text, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 생성된 특약 저장 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_latest_generated_endorsement() -> str | None:
+    """
+    데이터베이스에 저장된 가장 최신 특약 텍스트를 가져옵니다.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT endorsement_text FROM generated_endorsements ORDER BY generation_timestamp DESC LIMIT 1")
+    result = c.fetchone()
+    conn.close()
+    if result:
+        return result[0]
+    return None
