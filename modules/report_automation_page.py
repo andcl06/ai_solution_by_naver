@@ -87,6 +87,9 @@ def report_automation_page():
         st.session_state['db_status_message'] = ""
     if 'db_status_type' not in st.session_state:
         st.session_state['db_status_type'] = ""
+    # 자동 새로고침 카운터 (새로 추가)
+    if 'auto_refresh_counter' not in st.session_state:
+        st.session_state['auto_refresh_counter'] = 0
 
 
     # --- 자동 보고서 전송 스케줄러 (앱이 켜져 있을 때만 작동) ---
@@ -405,26 +408,58 @@ def report_automation_page():
             st.session_state['auto_refresh_on'] = False
             st.info("자동 전송 모드가 비활성화되었습니다.")
             st.rerun()
-        # 자동 새로고침 JavaScript 삽입
+        # 자동 새로고침 JavaScript 삽입 (setInterval로 변경)
         js_code = f"""
         <script>
-            const isTaskRunning = {json.dumps(st.session_state['scheduled_task_running'])};
-            if (!isTaskRunning) {{
-                setTimeout(function() {{
-                    window.location.reload();
-                }}, 60000); // 60초 (60000ms)마다 새로고침
-            }} else {{
-                console.log("Scheduled task is running, auto-refresh paused.");
-            }}
+            let intervalId;
+            const startRefresh = () => {{
+                if (!intervalId) {{
+                    intervalId = setInterval(() => {{
+                        const isTaskRunning = {json.dumps(st.session_state['scheduled_task_running'])};
+                        if (!isTaskRunning) {{
+                            window.location.reload();
+                        }} else {{
+                            console.log("Scheduled task is running, auto-refresh paused.");
+                        }}
+                    }}, 1000); // 1초마다 새로고침 시도
+                }}
+            }};
+            const stopRefresh = () => {{
+                if (intervalId) {{
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }}
+            }};
+
+            // 페이지 로드 시 새로고침 시작
+            startRefresh();
+
+            // Streamlit의 onRender 이벤트가 있다면 활용 (현재는 직접 제어)
+            // Streamlit.setComponentValue("auto_refresh_status", "active"); // 예시
         </script>
         """
         components.html(js_code, height=0, width=0, scrolling=False)
-        st.info("자동 전송 모드가 활성화되었습니다. 1분마다 앱이 새로고침됩니다. (예약된 작업 실행 중에는 새로고침 일시 중지)")
+        # 메시지 변경: 자동 전송 모드가 활성화되어 있음을 명확히 안내
+        st.info("자동 전송 모드가 활성화되었습니다. 앱이 켜져 있는 동안 예약된 시간에 보고서가 전송됩니다.")
+
+        # 앱 구동 중 메시지 및 카운터 (1초마다 업데이트)
+        if st.session_state['auto_refresh_counter'] % 60 == 0: # 60초마다 터미널에 출력
+            print(f"앱 구동 중... ({st.session_state['auto_refresh_counter']}초 경과)")
+        
+        # Streamlit 앱을 1초마다 재실행하도록 강제 (브라우저 활성화를 유도)
+        time.sleep(1)
+        st.session_state['auto_refresh_counter'] += 1
+        st.rerun() # 1초마다 강제 재실행
+
     else:
         if st.button("▶️ 자동 전송 모드 ON", help="앱이 주기적으로 새로고침되어 예약된 보고서를 자동으로 전송합니다."):
             st.session_state['auto_refresh_on'] = True
+            st.session_state['auto_refresh_counter'] = 0 # 카운터 초기화
             st.info("자동 전송 모드가 활성화되었습니다.")
             st.rerun()
+        # 메시지 변경: 자동 전송 모드 OFF 상태일 때 고정 문구 출력
+        st.warning("예약 전송을 위해 자동 모드를 켜주세요.")
+
 
     st.markdown("---") # 자동 전송 모드 버튼과 예약 섹션 사이 구분선
     st.header("⏰ 보고서 자동 전송 예약")
@@ -526,11 +561,9 @@ def report_automation_page():
                     f"**수신자**: {task['recipient_emails']}\n"
                     f"**마지막 실행일**: {task['last_run_date'] if task['last_run_date'] else '없음'}")
             
-            # 자동 전송 모드 활성화 메시지 (예약이 있을 때만 표시)
-            if st.session_state['auto_refresh_on']:
-                st.success("자동 전송 모드가 활성화되어 있습니다. 앱이 켜져 있는 동안 예약된 시간에 보고서가 전송됩니다.")
-            else:
-                st.warning("자동 전송 모드가 비활성화되어 있습니다. 예약된 보고서를 받으려면 '자동 전송 모드 ON'을 클릭해주세요.")
+            # 메시지 변경: 자동 전송 모드 활성화 상태와 관계없이 고정 문구 출력
+            # 이전에 있던 if/else 블록을 제거하고 고정 문구로 대체
+            st.warning("예약 전송을 위해 자동 모드를 켜주세요.")
 
         else:
             st.info("현재 예약된 보고서 자동 전송 작업이 없습니다.")
