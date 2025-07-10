@@ -23,23 +23,28 @@ def report_automation_page():
     """
     보고서 자동 전송 및 예약 기능을 제공하는 페이지입니다.
     """
-    st.title("⏰ 보고서 자동 전송 및 예약")
-    st.markdown("원하는 검색 설정에 따라 뉴스 트렌드 보고서를 자동으로 생성하고 지정된 이메일로 전송합니다.")
+    # --- Custom CSS for font sizes (원상 복구: CSS 제거) ---
+    # st.markdown("""
+    # <style>
+    # h1 {
+    #     font-size: 1.5em;
+    # }
+    # h3 {
+    #     font-size: 1.2em;
+    # }
+    # h4 {
+    #     font-size: 1em;
+    # }
+    # </style>
+    # """, unsafe_allow_html=True)
 
-    # --- 메인으로 돌아가기 버튼 ---
-    if st.button("⬅️ 메인으로"):
-        st.session_state.page = "landing"
-        st.rerun()
-    st.markdown("---")
-
-    # --- Potens.dev AI API 키 설정 ---
+    # --- 환경 변수 로드 및 이메일 설정 정보 로드를 함수 시작점으로 이동 ---
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
     if not POTENS_API_KEY:
         st.error("🚨 오류: .env 파일에 'POTENS_API_KEY'가 설정되지 않았습니다. Potens.dev AI 기능을 사용할 수 없습니다.")
-        return
+        return # API 키 없으면 페이지 기능 비활성화
 
-    # --- 이메일 설정 정보 로드 ---
     SENDER_EMAIL = os.getenv("SENDER_EMAIL")
     SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
     SMTP_SERVER = os.getenv("SMTP_SERVER")
@@ -56,7 +61,7 @@ def report_automation_page():
             st.error("🚨 오류: SMTP_PORT는 유효한 숫자여야 합니다.")
             email_config_ok = False
 
-    # 데이터베이스 초기화 (필요시)
+    # 데이터베이스 초기화 (필요시) 및 기사 로드도 함수 시작점으로 이동
     database_manager.init_db()
     all_db_articles = database_manager.get_all_articles()
 
@@ -75,19 +80,16 @@ def report_automation_page():
     if 'automation_email_status_type' not in st.session_state:
         st.session_state['automation_email_status_type'] = ""
     
-    # --- 수동 이메일 전송을 위한 세션 상태 (특약 포함) ---
     if 'manual_email_recipient_input' not in st.session_state:
         st.session_state['manual_email_recipient_input'] = ""
     if 'manual_email_status_message' not in st.session_state:
         st.session_state['manual_email_status_message'] = ""
     if 'manual_email_status_type' not in st.session_state:
         st.session_state['manual_email_status_type'] = ""
-    # 데이터베이스 초기화 관련 세션 상태 추가 (오류 해결)
     if 'db_status_message' not in st.session_state:
         st.session_state['db_status_message'] = ""
     if 'db_status_type' not in st.session_state:
         st.session_state['db_status_type'] = ""
-    # 자동 새로고침 카운터 (새로 추가)
     if 'auto_refresh_counter' not in st.session_state:
         st.session_state['auto_refresh_counter'] = 0
 
@@ -98,7 +100,7 @@ def report_automation_page():
     current_date_str = current_dt.strftime("%Y-%m-%d") #YYYY-MM-DD
     current_weekday_korean = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][current_dt.weekday()] # 현재 요일 (0=월, 6=일)
 
-    scheduled_task = st.session_state['scheduled_task']
+    scheduled_task = st.session_state.get('scheduled_task', None) # None으로 초기화될 수 있도록 변경
     
     # 예약된 작업이 실행 중이지 않을 때만 스케줄러를 체크
     if not st.session_state['scheduled_task_running'] and scheduled_task:
@@ -386,9 +388,9 @@ def report_automation_page():
                     st.session_state['scheduled_task_running'] = False
                     st.rerun() # 플래그 초기화 후 UI 업데이트를 위해 새로고침
             else:
-                st.error("🚨 예약된 작업에 해당하는 검색 프로필을 찾을 수 없습니다. 예약을 다시 설정해주세요.")
+                st.error("🚨 예약된 작업에 해당하는 검색 프리셋을 찾을 수 없습니다. 예약을 다시 설정해주세요.")
                 st.session_state['scheduled_task_running'] = False # 프로필 없으면 작업 종료
-                st.session_state['automation_email_status_message'] = "예약된 프로필을 찾을 수 없습니다."
+                st.session_state['automation_email_status_message'] = "예약된 프리셋을 찾을 수 없습니다."
                 st.session_state['automation_email_status_type'] = "error"
                 st.rerun()
         else: # scheduled_task가 None이거나 더 이상 유효하지 않을 경우
@@ -398,147 +400,103 @@ def report_automation_page():
         print(f"DEBUG: Scheduler: Not time yet or no task scheduled or already run today. Current time: {current_time_str}, Task time={task_time_str if scheduled_task else 'N/A'}, Last run date={last_run_date if scheduled_task else 'N/A'}, Current date={current_date_str}")
 
     # --- 페이지 UI 시작 ---
-    st.markdown("---")
-    st.header("⚙️ 자동 전송 및 보고서 예약 관리")
-    st.markdown("앱이 켜져 있는 동안 주기적으로 보고서를 전송하거나, 특정 시간에 자동 전송을 예약합니다.")
+    # 페이지 전체를 중앙에 배치하기 위한 최상위 컬럼
+    col_page_left_spacer, col_page_main_content, col_page_right_spacer = st.columns([0.1, 0.8, 0.1])
 
-    # 자동 전송 모드 토글 버튼
-    if st.session_state['auto_refresh_on']:
-        if st.button("🔄 자동 전송 모드 OFF", help="앱의 자동 새로고침을 끄고 예약된 보고서 전송을 중지합니다."):
-            st.session_state['auto_refresh_on'] = False
-            st.info("자동 전송 모드가 비활성화되었습니다.")
-            st.rerun()
-        # 자동 새로고침 JavaScript 삽입 (setInterval로 변경)
-        js_code = f"""
-        <script>
-            let intervalId;
-            const startRefresh = () => {{
-                if (!intervalId) {{
-                    intervalId = setInterval(() => {{
-                        const isTaskRunning = {json.dumps(st.session_state['scheduled_task_running'])};
-                        if (!isTaskRunning) {{
-                            window.location.reload();
-                        }} else {{
-                            console.log("Scheduled task is running, auto-refresh paused.");
-                        }}
-                    }}, 1000); // 1초마다 새로고침 시도
-                }}
-            }};
-            const stopRefresh = () => {{
-                if (intervalId) {{
-                    clearInterval(intervalId);
-                    intervalId = null;
-                }}
-            }};
+    with col_page_main_content:
+        st.title("⏰ 보고서 자동 전송 및 예약")
+        st.markdown("원하는 검색 설정에 따라 뉴스 트렌드 보고서를 자동으로 생성하고 지정된 이메일로 전송합니다.")
+        st.markdown("---")
 
-            // 페이지 로드 시 새로고침 시작
-            startRefresh();
+        # --- 메인으로 돌아가기 버튼, 특약 생성 버튼, 뉴스 트렌드 분석기 버튼을 나란히 배치 ---
+        col_home_button, col_endorsement_button, col_trend_button = st.columns([0.2, 0.2, 0.6])
+        with col_home_button:
+            if st.button("🏠 메인화면"):
+                st.session_state.page = "landing"
+                st.rerun()
+        with col_endorsement_button:
+            if st.button("📄 특약생성"):
+                st.session_state.page = "document"
+                st.rerun()
+        with col_trend_button:
+            if st.button("📈 뉴스 트렌드 분석기"):
+                st.session_state.page = "trend"
+                st.rerun()
 
-            // Streamlit의 onRender 이벤트가 있다면 활용 (현재는 직접 제어)
-            // Streamlit.setComponentValue("auto_refresh_status", "active"); // 예시
-        </script>
-        """
-        components.html(js_code, height=0, width=0, scrolling=False)
-        # 메시지 변경: 자동 전송 모드가 활성화되어 있음을 명확히 안내
-        st.info("자동 전송 모드가 활성화되었습니다. 앱이 켜져 있는 동안 예약된 시간에 보고서가 전송됩니다.")
+        st.markdown("---")
 
-        # 앱 구동 중 메시지 및 카운터 (1초마다 업데이트)
-        if st.session_state['auto_refresh_counter'] % 60 == 0: # 60초마다 터미널에 출력
-            print(f"앱 구동 중... ({st.session_state['auto_refresh_counter']}초 경과)")
-        
-        # Streamlit 앱을 1초마다 재실행하도록 강제 (브라우저 활성화를 유도)
-        time.sleep(1)
-        st.session_state['auto_refresh_counter'] += 1
-        st.rerun() # 1초마다 강제 재실행
+        # --- 섹션 2 & 3: 예약 설정과 수동 전송을 나란히 배치 ---
+        col_schedule_input_main, col_manual_send_main = st.columns(2)
 
-    else:
-        if st.button("▶️ 자동 전송 모드 ON", help="앱이 주기적으로 새로고침되어 예약된 보고서를 자동으로 전송합니다."):
-            st.session_state['auto_refresh_on'] = True
-            st.session_state['auto_refresh_counter'] = 0 # 카운터 초기화
-            st.info("자동 전송 모드가 활성화되었습니다.")
-            st.rerun()
-        # 메시지 변경: 자동 전송 모드 OFF 상태일 때 고정 문구 출력
-        st.warning("예약 전송을 위해 자동 모드를 켜주세요.")
+        with col_schedule_input_main:
+            st.subheader("⏰ 보고서 자동 전송 예약")
+            st.markdown("원하는 검색 프리셋과 시간을 설정하여 보고서를 매일 자동으로 수신자에게 전송합니다. (앱이 켜져 있을 때만 작동)")
 
+            st.markdown("#### 예약 설정")
+            available_profiles = database_manager.get_search_profiles()
+            profile_options = {p['profile_name']: p['id'] for p in available_profiles}
+            profile_names_for_schedule = ["-- 프리셋 선택 --"] + list(profile_options.keys())
 
-    st.markdown("---") # 자동 전송 모드 버튼과 예약 섹션 사이 구분선
-    st.header("⏰ 보고서 자동 전송 예약")
-    st.markdown("원하는 검색 프로필과 시간을 설정하여 보고서를 매일 자동으로 수신자에게 전송합니다. (앱이 켜져 있을 때만 작동)")
+            current_scheduled_profile_name = "-- 프리셋 선택 --"
+            if st.session_state['scheduled_task'] and st.session_state['search_profiles']:
+                task_profile_id = st.session_state['scheduled_task']['profile_id']
+                for p in st.session_state['search_profiles']:
+                    if p['id'] == task_profile_id:
+                        current_scheduled_profile_name = p['profile_name']
+                        break
 
-    # UI 레이아웃 변경: 예약 설정과 현재 예약된 작업을 나란히 배치
-    col_schedule_input, col_current_schedule = st.columns(2)
+            selected_schedule_profile_name = st.selectbox(
+                "예약할 검색 프리셋 선택:",
+                profile_names_for_schedule,
+                index=profile_names_for_schedule.index(current_scheduled_profile_name) if current_scheduled_profile_name in profile_names_for_schedule else 0,
+                key="schedule_profile_selector"
+            )
+            
+            schedule_days_options = ["매일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+            default_schedule_day = st.session_state['scheduled_task']['schedule_day'] if st.session_state['scheduled_task'] else "매일"
+            selected_schedule_day = st.selectbox(
+                "반복 요일 설정:",
+                schedule_days_options,
+                index=schedule_days_options.index(default_schedule_day) if default_schedule_day in schedule_days_options else 0,
+                key="schedule_day_selector"
+            )
 
-    with col_schedule_input:
-        st.subheader("예약 설정")
-        # 예약할 프로필 선택
-        available_profiles = database_manager.get_search_profiles()
-        profile_options = {p['profile_name']: p['id'] for p in available_profiles}
-        profile_names_for_schedule = ["-- 프로필 선택 --"] + list(profile_options.keys())
+            default_schedule_time = st.session_state['scheduled_task']['schedule_time'] if st.session_state['scheduled_task'] else "09:00"
+            schedule_time_input = st.text_input(
+                "자동 전송 시간 (HH:MM):",
+                value=default_schedule_time,
+                max_chars=5,
+                help="예: 09:00 (오전 9시), 14:30 (오후 2시 30분)"
+            )
 
-        # 현재 예약된 작업이 있다면 해당 프로필을 기본 선택값으로
-        current_scheduled_profile_name = "-- 프로필 선택 --"
-        if st.session_state['scheduled_task'] and st.session_state['search_profiles']:
-            task_profile_id = st.session_state['scheduled_task']['profile_id']
-            for p in st.session_state['search_profiles']:
-                if p['id'] == task_profile_id:
-                    current_scheduled_profile_name = p['profile_name']
-                    break
+            default_schedule_emails = st.session_state['scheduled_task']['recipient_emails'] if st.session_state['scheduled_task'] else ""
+            schedule_recipient_emails_input = st.text_area(
+                "예약 보고서 수신자 이메일 (콤마로 구분):",
+                value=default_schedule_emails,
+                height=70,
+                help="예약된 보고서를 받을 이메일 주소를 콤마(,)로 구분하여 입력하세요."
+            )
 
-        selected_schedule_profile_name = st.selectbox(
-            "예약할 검색 프로필 선택:",
-            profile_names_for_schedule,
-            index=profile_names_for_schedule.index(current_scheduled_profile_name) if current_scheduled_profile_name in profile_names_for_schedule else 0,
-            key="schedule_profile_selector"
-        )
-        
-        # 예약 요일 선택 (드롭다운 추가)
-        schedule_days_options = ["매일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
-        default_schedule_day = st.session_state['scheduled_task']['schedule_day'] if st.session_state['scheduled_task'] else "매일"
-        selected_schedule_day = st.selectbox(
-            "반복 요일 설정:",
-            schedule_days_options,
-            index=schedule_days_options.index(default_schedule_day) if default_schedule_day in schedule_days_options else 0,
-            key="schedule_day_selector"
-        )
-
-        # 예약 시간 입력
-        default_schedule_time = st.session_state['scheduled_task']['schedule_time'] if st.session_state['scheduled_task'] else "09:00"
-        schedule_time_input = st.text_input(
-            "자동 전송 시간 (HH:MM):",
-            value=default_schedule_time,
-            max_chars=5,
-            help="예: 09:00 (오전 9시), 14:30 (오후 2시 30분)"
-        )
-
-        # 예약 수신자 이메일 입력
-        default_schedule_emails = st.session_state['scheduled_task']['recipient_emails'] if st.session_state['scheduled_task'] else ""
-        schedule_recipient_emails_input = st.text_area(
-            "예약 보고서 수신자 이메일 (콤마로 구분):",
-            value=default_schedule_emails,
-            height=70,
-            help="예약된 보고서를 받을 이메일 주소를 콤마(,)로 구분하여 입력하세요."
-        )
-
-        col_set_schedule, col_clear_schedule = st.columns(2)
-        with col_set_schedule:
-            if st.button("예약 설정/업데이트", help="선택된 프로필과 시간으로 보고서 자동 전송을 예약합니다."):
-                if selected_schedule_profile_name == "-- 프로필 선택 --":
-                    st.warning("예약할 검색 프로필을 선택해주세요.")
-                elif not re.match(r"^(?:2[0-3]|[01]?[0-9]):(?:[0-5]?[0-9])$", schedule_time_input):
-                    st.warning("유효한 시간 형식(HH:MM)을 입력해주세요.")
-                elif not schedule_recipient_emails_input.strip():
-                    st.warning("예약 보고서를 받을 수신자 이메일 주소를 입력해주세요.")
-                else:
-                    selected_profile_id_for_schedule = profile_options.get(selected_schedule_profile_name)
-                    if selected_profile_id_for_schedule:
-                        if database_manager.save_scheduled_task(selected_profile_id_for_schedule, schedule_time_input, selected_schedule_day, schedule_recipient_emails_input): # selected_schedule_day 전달
-                            st.success(f"✅ 보고서 자동 전송이 '{selected_schedule_day}' '{schedule_time_input}'으로 예약되었습니다. 프로필: '{selected_schedule_profile_name}'")
-                            st.session_state['scheduled_task'] = database_manager.get_scheduled_task() # 예약 정보 새로고침
-                            st.rerun()
-                        else:
-                            st.error("🚨 보고서 예약 설정에 실패했습니다.")
+            col_set_schedule, col_clear_schedule = st.columns(2)
+            with col_set_schedule:
+                if st.button("예약 설정/업데이트", help="선택된 프리셋과 시간으로 보고서 자동 전송을 예약합니다."):
+                    if selected_schedule_profile_name == "-- 프리셋 선택 --":
+                        st.warning("예약할 검색 프리셋을 선택해주세요.")
+                    elif not re.match(r"^(?:2[0-3]|[01]?[0-9]):(?:[0-5]?[0-9])$", schedule_time_input):
+                        st.warning("유효한 시간 형식(HH:MM)을 입력해주세요.")
+                    elif not schedule_recipient_emails_input.strip():
+                        st.warning("예약 보고서를 받을 수신자 이메일 주소를 입력해주세요.")
                     else:
-                        st.error("🚨 선택된 프로필을 찾을 수 없습니다. 다시 시도해주세요.")
+                        selected_profile_id_for_schedule = profile_options.get(selected_schedule_profile_name)
+                        if selected_profile_id_for_schedule:
+                            if database_manager.save_scheduled_task(selected_profile_id_for_schedule, schedule_time_input, selected_schedule_day, schedule_recipient_emails_input):
+                                st.success(f"✅ 보고서 자동 전송이 '{selected_schedule_day}' '{schedule_time_input}'으로 예약되었습니다. 프리셋: '{selected_schedule_profile_name}'")
+                                st.session_state['scheduled_task'] = database_manager.get_scheduled_task() # 예약 정보 새로고침
+                                st.rerun()
+                            else:
+                                st.error("🚨 보고서 예약 설정에 실패했습니다.")
+                        else:
+                            st.error("🚨 선택된 프리셋을 찾을 수 없습니다. 다시 시도해주세요.")
             
             with col_clear_schedule:
                 if st.button("예약 취소", help="현재 설정된 보고서 자동 전송 예약을 취소합니다."):
@@ -549,257 +507,314 @@ def report_automation_page():
                     else:
                         st.error("🚨 보고서 예약 취소에 실패했습니다.")
 
-    with col_current_schedule:
-        st.subheader("현재 예약된 작업")
-        if st.session_state['scheduled_task']:
-            task = st.session_state['scheduled_task']
-            profiles_dict = {p['id']: p['profile_name'] for p in st.session_state['search_profiles']}
-            profile_name = profiles_dict.get(task['profile_id'], "알 수 없는 프로필")
-            st.info(f"**프로필**: {profile_name}\n"
-                    f"**전송 시간**: {task['schedule_time']}\n"
-                    f"**반복 요일**: {task['schedule_day']}\n" # 반복 요일 표시
-                    f"**수신자**: {task['recipient_emails']}\n"
-                    f"**마지막 실행일**: {task['last_run_date'] if task['last_run_date'] else '없음'}")
+        with col_manual_send_main: # 수동 전송 섹션을 오른쪽 컬럼으로 이동
+            st.subheader("현재 예약된 작업")
+            # 자동 전송 모드 버튼과 상태 메시지
+            # 원상 복구: 컨테이너 제거
+            # with st.container(border=True): # 제거
+            col_auto_toggle_btn, col_auto_toggle_status = st.columns([0.4, 0.6])
+            with col_auto_toggle_btn:
+                if st.session_state['auto_refresh_on']:
+                    if st.button("🔄 자동 전송 모드 OFF", help="앱의 자동 새로고침을 끄고 예약된 보고서 전송을 중지합니다."):
+                        st.session_state['auto_refresh_on'] = False
+                        st.rerun()
+                else:
+                    if st.button("▶️ 자동 전송 모드 ON", help="앱이 주기적으로 새로고침되어 예약된 보고서를 자동으로 전송합니다."):
+                        st.session_state['auto_refresh_on'] = True
+                        st.session_state['auto_refresh_counter'] = 0
+                        st.rerun()
+            with col_auto_toggle_status:
+                if st.session_state['auto_refresh_on']:
+                    st.success("자동 전송 모드가 활성화되었습니다. 앱이 켜져 있는 동안 예약된 시간에 보고서가 전송됩니다.")
+                else:
+                    st.warning("예약 전송을 위해 자동 모드를 켜주세요.")
             
-            # 메시지 변경: 자동 전송 모드 활성화 상태와 관계없이 고정 문구 출력
-            # 이전에 있던 if/else 블록을 제거하고 고정 문구로 대체
-            st.warning("예약 전송을 위해 자동 모드를 켜주세요.")
+            # 자동 새로고침 JavaScript 삽입
+            js_code = f"""
+            <script>
+                let intervalId;
+                const startRefresh = () => {{
+                    if (!intervalId) {{
+                        intervalId = setInterval(() => {{
+                            const isTaskRunning = {json.dumps(st.session_state.get('scheduled_task_running', False))}; // 오류 방지
+                            if (!isTaskRunning) {{
+                                window.location.reload();
+                            }} else {{
+                                console.log("Scheduled task is running, auto-refresh paused.");
+                            }}
+                        }}, 1000); // 1초마다 새로고침 시도
+                    }}
+                }};
+                const stopRefresh = () => {{
+                    if (intervalId) {{
+                        clearInterval(intervalId);
+                        intervalId = null;
+                    }}
+                }};
 
-        else:
-            st.info("현재 예약된 보고서 자동 전송 작업이 없습니다.")
-
-
-    # --- 수동 이메일 전송 섹션 (보고서 + 특약) ---
-    st.markdown("---")
-    st.header("📧 보고서 및 특약 수동 전송")
-    st.markdown("생성된 뉴스 트렌드 보고서와 문서 분석 페이지에서 생성된 특약을 이메일로 즉시 전송합니다.")
-
-    manual_recipient_emails_str = st.text_input(
-        "수동 전송 수신자 이메일 (콤마로 구분)",
-        value=st.session_state['manual_email_recipient_input'],
-        key="manual_email_recipients_input",
-        help="보고서와 특약을 받을 이메일 주소를 콤마(,)로 구분하여 입력하세요."
-    )
-
-    # 새로운 버튼 추가: 보고서 및 특약 모두 전송
-    if st.button("⚡ 보고서 & 특약 모두 전송", help="생성된 보고서와 특약을 연속으로 이메일 전송합니다."):
-        manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
-
-        if not manual_recipient_emails_list:
-            st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
-            st.session_state['manual_email_status_type'] = "error"
-            st.rerun()
-        elif not email_config_ok:
-            st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
-            st.session_state['manual_email_status_type'] = "error"
-            st.rerun()
-        else:
-            # 보고서 전송 로직
-            with st.spinner("보고서 이메일 전송 중..."):
-                report_send_success = False
-                email_subject_report = f"뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
-                report_body = st.session_state.get('prettified_report_for_download', "생성된 뉴스 트렌드 보고서가 없습니다.")
-                
-                excel_data_for_attachment = None
-                if st.session_state.get('prettified_report_for_download'):
-                    excel_data_for_attachment = data_exporter.export_ai_report_to_excel(
-                        st.session_state['prettified_report_for_download'], sheet_name='AI_Insights_Report'
-                    )
-
-                report_attachments = []
-                if excel_data_for_attachment:
-                    report_attachments.append({
-                        "data": excel_data_for_attachment.getvalue(),
-                        "filename": data_exporter.generate_filename("ai_insights_report", "xlsx"),
-                        "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    })
-                
-                if not report_attachments:
-                    st.session_state['manual_email_status_message'] = "🚨 첨부할 보고서 내용이 없어 보고서 전송을 건너뜁니다."
-                    st.session_state['manual_email_status_type'] = "error"
-                else:
-                    report_send_success = email_sender.send_email_with_multiple_attachments(
-                        sender_email=SENDER_EMAIL,
-                        sender_password=SENDER_PASSWORD,
-                        receiver_emails=manual_recipient_emails_list,
-                        smtp_server=SMTP_SERVER,
-                        smtp_port=SMTP_PORT,
-                        subject=email_subject_report,
-                        body=report_body,
-                        attachments=report_attachments,
-                        report_format="markdown"
-                    )
-                    if report_send_success:
-                        st.session_state['manual_email_status_message'] = "보고서 이메일이 성공적으로 전송되었습니다!"
-                        st.session_state['manual_email_status_type'] = "success"
-                    else:
-                        st.session_state['manual_email_status_message'] = "보고서 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
-                        st.session_state['manual_email_status_type'] = "error"
-                st.rerun() # 보고서 전송 상태를 즉시 반영
-
-            # 특약 전송 로직
-            with st.spinner("특약 이메일 전송 중..."):
-                endorsement_send_success = False
-                email_subject_endorsement = f"생성된 보험 특약 - {datetime.now().strftime('%Y%m%d')}"
-                endorsement_text_for_attachment = database_manager.get_latest_generated_endorsement()
-                
-                endorsement_attachments = []
-                if endorsement_text_for_attachment:
-                    endorsement_attachments.append({
-                        "data": endorsement_text_for_attachment.encode('utf-8'),
-                        "filename": data_exporter.generate_filename("생성된_보험_특약", "txt"),
-                        "mime_type": "text/plain"
-                    })
-                
-                if not endorsement_attachments:
-                    st.session_state['manual_email_status_message'] = "🚨 첨부할 특약 내용이 없어 특약 전송을 건너뜁니다."
-                    st.session_state['manual_email_status_type'] = "error"
-                else:
-                    endorsement_send_success = email_sender.send_email_with_multiple_attachments(
-                        sender_email=SENDER_EMAIL,
-                        sender_password=SENDER_PASSWORD,
-                        receiver_emails=manual_recipient_emails_list,
-                        smtp_server=SMTP_SERVER,
-                        smtp_port=SMTP_PORT,
-                        subject=email_subject_endorsement,
-                        body="요청하신 보험 특약 내용입니다. 첨부 파일을 확인해주세요.",
-                        attachments=endorsement_attachments,
-                        report_format="plain"
-                    )
-                    if endorsement_send_success:
-                        st.session_state['manual_email_status_message'] = "특약 이메일이 성공적으로 전송되었습니다!"
-                        st.session_state['manual_email_status_type'] = "success"
-                    else:
-                        st.session_state['manual_email_status_message'] = "특약 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
-                        st.session_state['manual_email_status_type'] = "error"
-                st.rerun() # 특약 전송 상태를 즉시 반영
-
-            # 최종 결과 메시지
-            if report_send_success and endorsement_send_success:
-                st.success("✅ 보고서와 특약 이메일이 모두 성공적으로 전송되었습니다!")
-            elif report_send_success:
-                st.warning("⚠️ 보고서 이메일은 전송되었으나, 특약 이메일 전송에 문제가 있었습니다.")
-            elif endorsement_send_success:
-                st.warning("⚠️ 특약 이메일은 전송되었으나, 보고서 이메일 전송에 문제가 있었습니다.")
-            else:
-                st.error("🚨 보고서와 특약 이메일 전송이 모두 실패했습니다. 설정을 확인해주세요.")
-            st.session_state['manual_email_status_message'] = "" # 메시지 초기화
-            st.session_state['manual_email_status_type'] = "" # 타입 초기화
-            st.rerun()
-
-
-    col_send_report, col_send_endorsement = st.columns(2)
-
-    with col_send_report:
-        if st.button("🚀 보고서만 이메일 전송", help="현재 생성된 보고서만 이메일로 전송합니다."):
-            manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
-
-            if not manual_recipient_emails_list:
-                st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
-                st.session_state['manual_email_status_type'] = "error"
+                // 페이지 로드 시 새로고침 시작
+                if ({json.dumps(st.session_state.get('auto_refresh_on', False))}) {{ // 오류 방지
+                    startRefresh();
+                }} else {{
+                    stopRefresh();
+                }}
+            </script>
+            """
+            components.html(js_code, height=0, width=0, scrolling=False)
+            
+            if st.session_state['auto_refresh_on']:
+                if st.session_state['auto_refresh_counter'] % 60 == 0:
+                    print(f"앱 구동 중... ({st.session_state['auto_refresh_counter']}초 경과)")
+                time.sleep(1)
+                st.session_state['auto_refresh_counter'] += 1
                 st.rerun()
-            elif not email_config_ok:
-                st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
-                st.session_state['manual_email_status_type'] = "error"
-                st.rerun()
-            else:
-                with st.spinner("보고서 이메일 전송 중..."):
-                    email_subject = f"뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
-                    report_body = st.session_state.get('prettified_report_for_download', "생성된 뉴스 트렌드 보고서가 없습니다.")
-                    
-                    excel_data_for_attachment = None
-                    if st.session_state.get('prettified_report_for_download'):
-                        excel_data_for_attachment = data_exporter.export_ai_report_to_excel(
-                            st.session_state['prettified_report_for_download'], sheet_name='AI_Insights_Report'
-                        )
 
-                    attachments = []
-                    if excel_data_for_attachment:
-                        attachments.append({
-                            "data": excel_data_for_attachment.getvalue(),
-                            "filename": data_exporter.generate_filename("ai_insights_report", "xlsx"),
-                            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        })
-                    
-                    if not attachments:
-                        st.session_state['manual_email_status_message'] = "🚨 첨부할 보고서 내용이 없습니다. 먼저 생성해주세요."
+
+            if st.session_state['scheduled_task']:
+                task = st.session_state['scheduled_task']
+                profiles_dict = {p['id']: p['profile_name'] for p in st.session_state['search_profiles']}
+                profile_name = profiles_dict.get(task['profile_id'], "알 수 없는 프리셋")
+                st.info(f"**프리셋**: {profile_name}\n"
+                        f"**전송 시간**: {task['schedule_time']}\n"
+                        f"**반복 요일**: {task['schedule_day']}\n"
+                        f"**수신자**: {task['recipient_emails']}\n"
+                        f"**마지막 실행일**: {task['last_run_date'] if task['last_run_date'] else '없음'}")
+                
+            else:
+                st.info("현재 예약된 보고서 자동 전송 작업이 없습니다.")
+
+            st.markdown("---")
+
+            st.subheader("📧 보고서 및 특약 수동 전송")
+            st.markdown("생성된 뉴스 트렌드 보고서와 문서 분석 페이지에서 생성된 특약을 이메일로 즉시 전송합니다.")
+
+            manual_recipient_emails_str = st.text_input(
+                "수동 전송 수신자 이메일 (콤마로 구분)",
+                value=st.session_state['manual_email_recipient_input'],
+                key="manual_email_recipients_input",
+                help="보고서와 특약을 받을 이메일 주소를 콤마(,)로 구분하여 입력하세요."
+            )
+
+            col_send_all, col_send_report, col_send_endorsement = st.columns([0.4, 0.3, 0.3])
+
+            with col_send_all:
+                if st.button("⚡ 보고서 & 특약 모두 전송", help="생성된 보고서와 특약을 연속으로 이메일 전송합니다."):
+                    manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
+
+                    if not manual_recipient_emails_list:
+                        st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
+                        st.session_state['manual_email_status_type'] = "error"
+                        st.rerun()
+                    elif not email_config_ok:
+                        st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
                         st.session_state['manual_email_status_type'] = "error"
                         st.rerun()
                     else:
-                        success = email_sender.send_email_with_multiple_attachments(
-                            sender_email=SENDER_EMAIL,
-                            sender_password=SENDER_PASSWORD,
-                            receiver_emails=manual_recipient_emails_list,
-                            smtp_server=SMTP_SERVER,
-                            smtp_port=SMTP_PORT,
-                            subject=email_subject,
-                            body=report_body,
-                            attachments=attachments,
-                            report_format="markdown"
-                        )
-                        if success:
-                            st.session_state['manual_email_status_message'] = "보고서 이메일이 성공적으로 전송되었습니다!"
-                            st.session_state['manual_email_status_type'] = "success"
+                        with st.spinner("보고서 이메일 전송 중..."):
+                            report_send_success = False
+                            email_subject_report = f"뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
+                            report_body = st.session_state.get('prettified_report_for_download', "생성된 뉴스 트렌드 보고서가 없습니다.")
+                            
+                            excel_data_for_attachment = None
+                            if st.session_state.get('prettified_report_for_download'):
+                                excel_data_for_attachment = data_exporter.export_ai_report_to_excel(
+                                    st.session_state['prettified_report_for_download'], sheet_name='AI_Insights_Report'
+                                )
+
+                            report_attachments = []
+                            if excel_data_for_attachment:
+                                report_attachments.append({
+                                    "data": excel_data_for_attachment.getvalue(),
+                                    "filename": data_exporter.generate_filename("ai_insights_report", "xlsx"),
+                                    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                })
+                            
+                            if not report_attachments:
+                                st.session_state['manual_email_status_message'] = "🚨 첨부할 보고서 내용이 없어 보고서 전송을 건너뜁니다."
+                                st.session_state['manual_email_status_type'] = "error"
+                            else:
+                                report_send_success = email_sender.send_email_with_multiple_attachments(
+                                    sender_email=SENDER_EMAIL,
+                                    sender_password=SENDER_PASSWORD,
+                                    receiver_emails=manual_recipient_emails_list,
+                                    smtp_server=SMTP_SERVER,
+                                    smtp_port=SMTP_PORT,
+                                    subject=email_subject_report,
+                                    body=report_body,
+                                    attachments=report_attachments,
+                                    report_format="markdown"
+                                )
+                                if report_send_success:
+                                    st.session_state['manual_email_status_message'] = "보고서 이메일이 성공적으로 전송되었습니다!"
+                                    st.session_state['manual_email_status_type'] = "success"
+                                else:
+                                    st.session_state['manual_email_status_message'] = "보고서 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
+                                    st.session_state['manual_email_status_type'] = "error"
+                            st.rerun()
+
+                        # 특약 전송 로직
+                        with st.spinner("특약 이메일 전송 중..."):
+                            endorsement_send_success = False
+                            email_subject_endorsement = f"생성된 보험 특약 - {datetime.now().strftime('%Y%m%d')}"
+                            endorsement_text_for_attachment = database_manager.get_latest_generated_endorsement()
+                            
+                            endorsement_attachments = []
+                            if endorsement_text_for_attachment:
+                                endorsement_attachments.append({
+                                    "data": endorsement_text_for_attachment.encode('utf-8'),
+                                    "filename": data_exporter.generate_filename("생성된_보험_특약", "txt"),
+                                    "mime_type": "text/plain"
+                                })
+                            
+                            if not endorsement_attachments:
+                                st.session_state['manual_email_status_message'] = "🚨 첨부할 특약 내용이 없어 특약 전송을 건너뜁니다."
+                                st.session_state['manual_email_status_type'] = "error"
+                            else:
+                                success = email_sender.send_email_with_multiple_attachments(
+                                    sender_email=SENDER_EMAIL,
+                                    sender_password=SENDER_PASSWORD,
+                                    receiver_emails=manual_recipient_emails_list,
+                                    smtp_server=SMTP_SERVER,
+                                    smtp_port=SMTP_PORT,
+                                    subject=email_subject_endorsement,
+                                    body="요청하신 보험 특약 내용입니다. 첨부 파일을 확인해주세요.",
+                                    attachments=endorsement_attachments,
+                                    report_format="plain"
+                                )
+                                if success:
+                                    st.session_state['manual_email_status_message'] = "특약 이메일이 성공적으로 전송되었습니다!"
+                                    st.session_state['manual_email_status_type'] = "success"
+                                else:
+                                    st.session_state['manual_email_status_message'] = "특약 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
+                                    st.session_state['manual_email_status_type'] = "error"
+                            st.rerun()
+
+                        # 최종 결과 메시지
+                        if report_send_success and endorsement_send_success:
+                            st.success("✅ 보고서와 특약 이메일이 모두 성공적으로 전송되었습니다!")
+                        elif report_send_success:
+                            st.warning("⚠️ 보고서 이메일은 전송되었으나, 특약 이메일 전송에 문제가 있었습니다.")
+                        elif endorsement_send_success:
+                            st.warning("⚠️ 특약 이메일은 전송되었으나, 보고서 전송에 문제가 있었습니다.")
                         else:
-                            st.session_state['manual_email_status_message'] = "보고서 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
-                            st.session_state['manual_email_status_type'] = "error"
+                            st.error("🚨 보고서와 특약 이메일 전송이 모두 실패했습니다. 설정을 확인해주세요.")
+                        st.session_state['manual_email_status_message'] = ""
+                        st.session_state['manual_email_status_type'] = ""
                         st.rerun()
 
-    with col_send_endorsement:
-        if st.button("📝 특약만 이메일 전송", help="현재 생성된 특약만 이메일로 전송합니다."):
-            manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
 
-            if not manual_recipient_emails_list:
-                st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
-                st.session_state['manual_email_status_type'] = "error"
-                st.rerun()
-            elif not email_config_ok:
-                st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
-                st.session_state['manual_email_status_type'] = "error"
-                st.rerun()
-            else:
-                with st.spinner("특약 이메일 전송 중..."):
-                    email_subject = f"생성된 보험 특약 - {datetime.now().strftime('%Y%m%d')}"
-                    endorsement_text_for_attachment = database_manager.get_latest_generated_endorsement()
-                    
-                    attachments = []
-                    if endorsement_text_for_attachment:
-                        attachments.append({
-                            "data": endorsement_text_for_attachment.encode('utf-8'),
-                            "filename": data_exporter.generate_filename("생성된_보험_특약", "txt"),
-                            "mime_type": "text/plain"
-                        })
-                    
-                    if not attachments:
-                        st.session_state['manual_email_status_message'] = "🚨 첨부할 특약 내용이 없습니다. 먼저 생성해주세요."
+            col_send_report, col_send_endorsement = st.columns(2)
+
+            with col_send_report:
+                if st.button("🚀 보고서만 이메일 전송", help="현재 생성된 보고서만 이메일로 전송합니다."):
+                    manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
+
+                    if not manual_recipient_emails_list:
+                        st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
+                        st.session_state['manual_email_status_type'] = "error"
+                        st.rerun()
+                    elif not email_config_ok:
+                        st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
                         st.session_state['manual_email_status_type'] = "error"
                         st.rerun()
                     else:
-                        success = email_sender.send_email_with_multiple_attachments(
-                            sender_email=SENDER_EMAIL,
-                            sender_password=SENDER_PASSWORD,
-                            receiver_emails=manual_recipient_emails_list,
-                            smtp_server=SMTP_SERVER,
-                            smtp_port=SMTP_PORT,
-                            subject=email_subject,
-                            body="요청하신 보험 특약 내용입니다. 첨부 파일을 확인해주세요.", # 특약만 보낼 때는 본문을 간단히
-                            attachments=attachments,
-                            report_format="plain" # 특약만 보낼 때는 plain 텍스트로
-                        )
-                        if success:
-                            st.session_state['manual_email_status_message'] = "특약 이메일이 성공적으로 전송되었습니다!"
-                            st.session_state['manual_email_status_type'] = "success"
-                        else:
-                            st.session_state['manual_email_status_message'] = "특약 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
-                            st.session_state['manual_email_status_type'] = "error"
+                        with st.spinner("보고서 이메일 전송 중..."):
+                            email_subject = f"뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
+                            report_body = st.session_state.get('prettified_report_for_download', "생성된 뉴스 트렌드 보고서가 없습니다.")
+                            
+                            excel_data_for_attachment = None
+                            if st.session_state.get('prettified_report_for_download'):
+                                excel_data_for_attachment = data_exporter.export_ai_report_to_excel(
+                                    st.session_state['prettified_report_for_download'], sheet_name='AI_Insights_Report'
+                                )
+
+                            attachments = []
+                            if excel_data_for_attachment:
+                                attachments.append({
+                                    "data": excel_data_for_attachment.getvalue(),
+                                    "filename": data_exporter.generate_filename("ai_insights_report", "xlsx"),
+                                    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                })
+                            
+                            if not attachments:
+                                st.session_state['manual_email_status_message'] = "🚨 첨부할 보고서 내용이 없습니다. 먼저 생성해주세요."
+                                st.session_state['manual_email_status_type'] = "error"
+                                st.rerun()
+                            else:
+                                success = email_sender.send_email_with_multiple_attachments(
+                                    sender_email=SENDER_EMAIL,
+                                    sender_password=SENDER_PASSWORD,
+                                    receiver_emails=manual_recipient_emails_list,
+                                    smtp_server=SMTP_SERVER,
+                                    smtp_port=SMTP_PORT,
+                                    subject=email_subject,
+                                    body=report_body,
+                                    attachments=attachments,
+                                    report_format="markdown"
+                                )
+                                if success:
+                                    st.session_state['manual_email_status_message'] = "보고서 이메일이 성공적으로 전송되었습니다!"
+                                    st.session_state['manual_email_status_type'] = "success"
+                                else:
+                                    st.session_state['manual_email_status_message'] = "보고서 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
+                                    st.session_state['manual_email_status_type'] = "error"
+                                st.rerun()
+
+            with col_send_endorsement:
+                if st.button("📝 특약만 이메일 전송", help="현재 생성된 특약만 이메일로 전송합니다."):
+                    manual_recipient_emails_list = [e.strip() for e in manual_recipient_emails_str.split(',') if e.strip()]
+
+                    if not manual_recipient_emails_list:
+                        st.session_state['manual_email_status_message'] = "🚨 수신자 이메일 주소를 입력해주세요."
+                        st.session_state['manual_email_status_type'] = "error"
                         st.rerun()
+                    elif not email_config_ok:
+                        st.session_state['manual_email_status_message'] = "🚨 이메일 설정 정보가 올바르지 않아 이메일을 전송할 수 없습니다."
+                        st.session_state['manual_email_status_type'] = "error"
+                        st.rerun()
+                    else:
+                        with st.spinner("특약 이메일 전송 중..."):
+                            email_subject = f"생성된 보험 특약 - {datetime.now().strftime('%Y%m%d')}"
+                            endorsement_text_for_attachment = database_manager.get_latest_generated_endorsement()
+                            
+                            attachments = []
+                            if endorsement_text_for_attachment:
+                                attachments.append({
+                                    "data": endorsement_text_for_attachment.encode('utf-8'),
+                                    "filename": data_exporter.generate_filename("생성된_보험_특약", "txt"),
+                                    "mime_type": "text/plain"
+                                })
+                            
+                            if not attachments:
+                                st.session_state['manual_email_status_message'] = "🚨 첨부할 특약 내용이 없습니다. 먼저 생성해주세요."
+                                st.session_state['manual_email_status_type'] = "error"
+                                st.rerun()
+                            else:
+                                success = email_sender.send_email_with_multiple_attachments(
+                                    sender_email=SENDER_EMAIL,
+                                    sender_password=SENDER_PASSWORD,
+                                    receiver_emails=manual_recipient_emails_list,
+                                    smtp_server=SMTP_SERVER,
+                                    smtp_port=SMTP_PORT,
+                                    subject=email_subject,
+                                    body="요청하신 보험 특약 내용입니다. 첨부 파일을 확인해주세요.",
+                                    attachments=attachments,
+                                    report_format="plain"
+                                )
+                                if success:
+                                    st.session_state['manual_email_status_message'] = "특약 이메일이 성공적으로 전송되었습니다!"
+                                    st.session_state['manual_email_status_type'] = "success"
+                                else:
+                                    st.session_state['manual_email_status_message'] = "특약 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
+                                    st.session_state['manual_email_status_type'] = "error"
+                                st.rerun()
 
     # 수동 이메일 전송 상태 메시지 표시
     if st.session_state['manual_email_status_message']:
         if st.session_state['manual_email_status_type'] == "success":
             st.success(st.session_state['manual_email_status_message'])
         elif st.session_state['manual_email_status_type'] == "error":
-            st.error(st.session_state['manual_email_status_message']) # 메시지 출력으로 변경
+            st.error(st.session_state['manual_email_status_message'])
         st.session_state['manual_email_status_message'] = ""
         st.session_state['manual_email_status_type'] = ""
 
@@ -811,12 +826,12 @@ def report_automation_page():
             if st.session_state['db_status_type'] == "success":
                 st.success(st.session_state['db_status_message'])
             elif st.session_state['db_status_type'] == "error":
-                st.error(st.session_state['db_status_message']) # 메시지 출력으로 변경
+                st.error(st.session_state['db_status_message'])
             st.session_state['db_status_message'] = ""
             st.session_state['db_status_type'] = ""
         st.markdown("💡 **CSV 파일이 엑셀에서 깨질 경우:** 엑셀에서 '데이터' 탭 -> '텍스트/CSV 가져오기'를 클릭한 후, '원본 파일' 인코딩을 'UTF-8'로 선택하여 가져오세요.")
     with col_db_clear:
-        if st.button("데이터베이스 초기화", help="데이터베이스의 모든 저장된 뉴스를 삭제합니다.", type="secondary"):
+        if st.button("데이터베이스 초기화", help="데이터베이스의 모든 저장된 뉴스를 삭제합니다."):
             database_manager.clear_db_content()
             st.session_state['trending_keywords_data'] = []
             st.session_state['displayed_keywords'] = []
@@ -831,7 +846,8 @@ def report_automation_page():
             st.session_state['formatted_insurance_info'] = ""
             st.session_state['email_status_message'] = ""
             st.session_state['email_status_type'] = ""
-            st.session_state['search_profiles'] = database_manager.get_search_profiles() # 프로필 목록 새로고침
-            st.session_state['scheduled_task'] = database_manager.get_scheduled_task() # 예약 정보 새로고침
-            database_manager.save_generated_endorsement("") # 데이터베이스 특약도 초기화 (새로 추가)
+            st.session_state['search_profiles'] = database_manager.get_search_profiles()
+            st.session_state['scheduled_task'] = database_manager.get_scheduled_task()
+            database_manager.save_generated_endorsement("")
             st.rerun()
+
