@@ -59,7 +59,7 @@ def landing_page():
 
 
     # 상단 로고 및 앱 이름
-    st.markdown("<h1 style='color: #FF4B4B;'>TT 트렌드 인사이트 자동화</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='color: #FF4B4B;'>HEAIRT 트렌드 인사이트 자동화</h1>", unsafe_allow_html=True)
     st.markdown("<p style='color: grey; margin-top: -10px;'>Trend Insight Automator</p>", unsafe_allow_html=True)
 
     st.markdown("---")

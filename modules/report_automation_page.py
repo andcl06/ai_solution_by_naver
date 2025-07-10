@@ -406,7 +406,6 @@ def report_automation_page():
     with col_page_main_content:
         st.title("⏰ 보고서 자동 전송 및 예약")
         st.markdown("원하는 검색 설정에 따라 뉴스 트렌드 보고서를 자동으로 생성하고 지정된 이메일로 전송합니다.")
-        st.markdown("---")
 
         # --- 메인으로 돌아가기 버튼, 특약 생성 버튼, 뉴스 트렌드 분석기 버튼을 나란히 배치 ---
         col_home_button, col_endorsement_button, col_trend_button = st.columns([0.2, 0.2, 0.6])

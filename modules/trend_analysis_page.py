@@ -33,11 +33,22 @@ def trend_analysis_page():
         st.title("📰 뉴스 트렌드 분석기")
         st.markdown("원하는 키워드로 네이버 뉴스 트렌드를 감지하고, AI가 요약한 기사 내용을 확인하세요.")
 
-        # --- 메인으로 돌아가기 버튼 ---
-        if st.button("⬅️ 메인으로"):
-            st.session_state.page = "landing"
-            st.rerun()
-        st.markdown("---") # 버튼 아래 구분선 추가
+        # --- 네비게이션 ---
+        col_home_button, col_endorsement_button, col_trend_button = st.columns([0.2, 0.2, 0.6])
+        with col_home_button:
+            if st.button("🏠 메인화면"):
+                st.session_state.page = "landing"
+                st.rerun()
+        with col_endorsement_button:
+            if st.button("📄 특약생성"):
+                st.session_state.page = "document"
+                st.rerun()
+        with col_trend_button:
+            if st.button("⏰ 자동화"):
+                st.session_state.page = "automation"
+                st.rerun()
+
+        st.markdown("---")
 
         # --- Potens.dev AI API 키 설정 ---
         POTENS_API_KEY = os.getenv("POTENS_API_KEY")

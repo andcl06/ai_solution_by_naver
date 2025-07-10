@@ -19,11 +19,24 @@ def document_analysis_page():
     """
     st.title("📄 _Private Data :red[QA Chat]_")
 
-    # 메인으로 돌아가기 버튼
-    if st.button("⬅️ 메인으로"):
-        st.session_state.page = "landing"
-        st.rerun()
-    st.markdown("---") # 버튼 아래 구분선 추가
+
+# --- 메인으로 돌아가기 버튼, 자동화, 뉴스 트렌드 분석기 버튼을 나란히 배치 ---
+    col_home_button, col_trend_button, col_automaion_button = st.columns([0.2, 0.2, 0.6])
+    with col_home_button:
+        if st.button("🏠 메인화면"):
+            st.session_state.page = "landing"
+            st.rerun()
+    
+    with col_trend_button:
+        if st.button("📈 뉴스 트렌드 분석기"):
+            st.session_state.page = "trend"
+            st.rerun()
+
+    with col_automaion_button:
+        if st.button("⏰ 자동화"):
+            st.session_state.page = "automation"
+            st.rerun()
+        st.markdown("---")
 
     # Potens API 키 로드 (main_app.py에서 로드된 것을 사용)
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
