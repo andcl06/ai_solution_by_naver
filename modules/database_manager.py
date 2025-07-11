@@ -52,6 +52,14 @@ def init_db():
             generation_timestamp TEXT NOT NULL
         )
     ''')
+    # 새 테이블 추가: 문서 분석을 위해 업로드된 문서의 전체 텍스트 저장
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS document_texts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_text TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -84,6 +92,11 @@ def clear_db_content():
     c = conn.cursor()
     try:
         c.execute("DELETE FROM articles")
+        # 추가: 검색 프로필, 예약 작업, 생성된 특약, 문서 텍스트도 함께 삭제
+        c.execute("DELETE FROM search_profiles")
+        c.execute("DELETE FROM scheduled_tasks")
+        c.execute("DELETE FROM generated_endorsements")
+        c.execute("DELETE FROM document_texts")
         conn.commit()
         st.session_state['db_status_message'] = "데이터베이스의 모든 기록이 성공적으로 삭제되었습니다."
         st.session_state['db_status_type'] = "success"
@@ -208,7 +221,7 @@ def clear_scheduled_task():
     finally:
         conn.close()
 
-# --- 생성된 특약 관련 함수 (새로 추가) ---
+# --- 생성된 특약 관련 함수 ---
 def save_generated_endorsement(endorsement_text: str):
     """
     생성된 특약 텍스트를 데이터베이스에 저장합니다.
@@ -237,6 +250,41 @@ def get_latest_generated_endorsement() -> str | None:
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT endorsement_text FROM generated_endorsements ORDER BY generation_timestamp DESC LIMIT 1")
+    result = c.fetchone()
+    conn.close()
+    if result:
+        return result[0]
+    return None
+
+# --- 문서 텍스트 저장 및 로드 함수 (새로 추가) ---
+def save_document_text(full_text: str):
+    """
+    업로드된 문서의 전체 텍스트를 데이터베이스에 저장합니다.
+    항상 가장 최신 텍스트만 유지합니다 (기존 텍스트 삭제 후 새로 삽입).
+    """
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        # 기존 문서 텍스트 삭제
+        c.execute("DELETE FROM document_texts")
+        # 새 문서 텍스트 삽입
+        c.execute("INSERT INTO document_texts (full_text, timestamp) VALUES (?, ?)",
+                  (full_text, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"오류: 문서 텍스트 저장 실패 - {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_latest_document_text() -> str | None:
+    """
+    데이터베이스에 저장된 가장 최신 문서 텍스트를 가져옵니다.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT full_text FROM document_texts ORDER BY timestamp DESC LIMIT 1")
     result = c.fetchone()
     conn.close()
     if result:

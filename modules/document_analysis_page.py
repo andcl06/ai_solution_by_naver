@@ -87,14 +87,19 @@ def document_analysis_page():
             vectordb = document_processor.get_vectorstore(chunks)
             st.session_state.vectordb = vectordb
             st.session_state.docs = docs # 'docs' 세션 상태에 저장 (특약 생성에서 사용)
+            
+            # 문서의 전체 텍스트를 추출하여 데이터베이스에 저장 (새로 추가된 부분)
+            all_text_from_docs = "\n\n".join([doc.page_content for doc in docs])
+            database_manager.save_document_text(all_text_from_docs)
+
             st.success("✅ 문서 분석 완료! 메뉴를 선택해 진행하세요.")
             st.session_state.messages = [{ # 문서 처리 후 메시지 초기화
                 "role": "assistant",
                 "content": "문서 분석이 완료되었습니다. 이제 질문하거나 특약을 생성할 수 있습니다."
             }]
             st.session_state.generated_endorsement_sections = {} # 문서 처리 시 특약 초기화
-            st.session_state['generated_endorsement_full_text'] = "" # 특약 전체 텍스트 초기화 (DB에도 반영 필요)
-            database_manager.save_generated_endorsement("") # DB에서도 특약 초기화
+            st.session_state['generated_endorsement_full_text'] = "" # 특약 전체 텍스트 초기화
+            database_manager.save_generated_endorsement("") # DB에서도 특약 초기화 (새로 추가된 부분)
             st.rerun()
 
 
@@ -146,10 +151,15 @@ def document_analysis_page():
     elif selected_menu == "특약 생성":
         st.subheader("📑 보험 특약 생성기")
 
+        # 기존 로직 유지: 세션 상태에 docs가 없으면 경고 (문서 처리 필요)
         if "docs" not in st.session_state or not st.session_state.docs:
+            # 하지만 이제 DB에서 원본 텍스트를 불러올 수 있으므로, 해당 텍스트가 있다면 특약 생성을 시도할 수 있음
+            # 여기서는 편의상 기존 동작을 유지하고, DB 로직은 자동화 페이지에서 활용
             st.warning("문서를 먼저 업로드하고 처리해주세요.")
             st.stop()
 
+        # 세션 상태에 저장된 docs를 사용하거나, DB에서 불러온 텍스트를 사용
+        # 현재 페이지에서는 'docs' 세션 상태가 우선이므로 그대로 사용
         all_text = "\n\n".join([doc.page_content for doc in st.session_state.docs])
         
         # 특약 구성 항목 정의 (협업자 파일에서 가져옴)
@@ -213,7 +223,7 @@ def document_analysis_page():
             for title, content in st.session_state.generated_endorsement_sections.items():
                 st.markdown(f"#### {title}") # 협업자 코드처럼 각 섹션 제목을 마크다운 헤더로
                 st.write(content) # 각 섹션의 내용을 일반 텍스트로 표시하여 글자 크기 제어
-                full_text_for_download_display += f"#### {title}\n{content.strip()}\n\n" # 다운로드용 텍스트 다시 구성
+                full_text_for_download_display += f"#### {title}\n{content.strip()}\n\n" # 다운로드용 ...
 
             # 다운로드 버튼 추가
             st.download_button(

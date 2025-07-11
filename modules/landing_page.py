@@ -147,4 +147,4 @@ def landing_page():
         st.rerun()
 
     # 저작권 정보
-    st.markdown("<p style='font-size: 12px; color: grey; margin-top: 30px;'>&copy; 2025. 트렌드 기반 특약생성 솔루션. By 메이커스랩. Ver 1.0</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 12px; color: grey; margin-top: 30px;'>&copy; 2025. 트렌드 기반 특약생성 솔루션. By 메이커스랩 1기 3팀</p>", unsafe_allow_html=True)

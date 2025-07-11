@@ -23,21 +23,6 @@ def report_automation_page():
     """
     보고서 자동 전송 및 예약 기능을 제공하는 페이지입니다.
     """
-    # --- Custom CSS for font sizes (원상 복구: CSS 제거) ---
-    # st.markdown("""
-    # <style>
-    # h1 {
-    #     font-size: 1.5em;
-    # }
-    # h3 {
-    #     font-size: 1.2em;
-    # }
-    # h4 {
-    #     font-size: 1em;
-    # }
-    # </style>
-    # """, unsafe_allow_html=True)
-
     # --- 환경 변수 로드 및 이메일 설정 정보 로드를 함수 시작점으로 이동 ---
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
 
@@ -111,12 +96,10 @@ def report_automation_page():
         # 디버깅을 위한 출력 (사이드바에 표시 및 콘솔 출력)
         print(f"DEBUG: Scheduler check - Current time={current_time_str}, Task time={task_time_str}, Task day={task_day}, Current day={current_weekday_korean}, Last run={last_run_date}, Current date={current_date_str}")
 
-        # 예약 시간이 현재 시간의 5분 전부터 예약 시간 1분 후까지의 범위에 있고, 오늘 아직 실행되지 않았다면
-        # 그리고 예약 요일 조건도 만족하는지 확인
+        # 예약 시간 5분 전부터 예약 시간 1분 후까지의 범위에 현재 시간이 포함되는지 확인
         try:
             task_hour, task_minute = map(int, task_time_str.split(':'))
             
-            # 예약 시간 5분 전부터 예약 시간 1분 후까지의 범위에 현재 시간이 포함되는지 확인
             scheduled_dt_today = current_dt.replace(hour=task_hour, minute=task_minute, second=0, microsecond=0)
             trigger_start_dt = scheduled_dt_today - timedelta(minutes=5)
             trigger_end_dt = scheduled_dt_today + timedelta(minutes=1) # 예약 시간 1분 후까지 여유를 둠
@@ -271,20 +254,73 @@ def report_automation_page():
                                 final_prettified_report, sheet_name='AI_Insights_Report'
                             )
 
-                        # 8. 이메일 전송
+                        # --- 8. 특약 동적 생성 로직 (수정된 부분: 보고서 내용을 기반으로 생성) ---
+                        endorsement_text_for_attachment = None
+                        endorsement_filename = None
+                        
+                        # 새로 생성된 보고서 내용을 특약 생성의 기반으로 사용
+                        # all_text_from_db = database_manager.get_latest_document_text() # 이 부분은 이제 사용하지 않음
+                        
+                        if final_prettified_report: # 새로 생성된 보고서 내용이 있을 경우에만 특약 생성 시도
+                            st.info("⏳ 새로 생성된 보고서 내용을 기반으로 특약을 동적으로 생성 중...")
+                            # 특약 구성 항목 정의 (document_analysis_page.py에서 가져옴)
+                            sections_for_endorsement = {
+                                "1. 특약의 명칭": "자동차 보험 표준약관을 참고하여 특약의 **명칭**을 작성해줘.",
+                                "2. 특약의 목적": "이 특약의 **목적**을 설명해줘.",
+                                "3. 보장 범위": "**보장 범위**에 대해 상세히 작성해줘.",
+                                "4. 보험금 지급 조건": "**보험금 지급 조건**을 구체적으로 작성해줘.",
+                                "5. 보험료 산정 방식": "**보험료 산정 방식**을 설명해줘.",
+                                "6. 면책 사항": "**면책 사항**에 해당하는 내용을 작성해줘.",
+                                "7. 특약의 적용 기간": "**적용 기간**을 명시해줘.",
+                                "8. 기타 특별 조건": "**기타 특별 조건**이 있다면 제안해줘.",
+                                "9. 운전가능자 제한": "**운전자 연령과 범위**에 따른 특별 약관을 제안해줘.",
+                                "10. 보험료 할인": "**보험료 할인**에 해당하는 특별 약관을 작성해줘.",
+                                "11. 보장 확대": "**법률비용 및 다른 자동차 운전**에 해당하는 특별 약관을 작성해줘"
+                            }
+                            
+                            generated_endorsement_sections = {}
+                            full_endorsement_text = ""
+
+                            for title, question in sections_for_endorsement.items():
+                                prompt_endorsement = f"""
+너는 자동차 보험을 설계하고 있는 보험사 직원이야.
+다음 조건에 따라 자동차 보험 특약의 '{title}'을 3~5줄 정도로 작성해줘.
+
+[기획 목적]
+- 이 특약은 보험 상품 기획 초기 단계에서 트렌드 조사 및 방향성 도출에 도움 되는 목적으로 작성돼야 해.
+- 새로운 기술(예: 블랙박스, 자율주행 등)이나 최근 사회적 이슈(예: 고령 운전자 증가 등)를 반영해도 좋아.
+- 표준약관 표현 방식을 따라줘.
+
+[표준약관 내용]
+{final_prettified_report} # 새로 생성된 보고서 내용을 특약 생성의 기반으로 사용
+
+[질문]
+{question}
+
+[답변]
+"""
+                                response_dict_endorsement = ai_service.retry_ai_call(prompt_endorsement, POTENS_API_KEY)
+                                answer_endorsement = ai_service.clean_ai_response_text(response_dict_endorsement.get("text", response_dict_endorsement.get("error", "AI 응답 실패.")))
+                                generated_endorsement_sections[title] = answer_endorsement
+                                full_endorsement_text += f"#### {title}\n{answer_endorsement.strip()}\n\n"
+                            
+                            endorsement_text_for_attachment = full_endorsement_text
+                            database_manager.save_generated_endorsement(endorsement_text_for_attachment) # 동적 생성 후 DB에 저장
+                            endorsement_filename = data_exporter.generate_filename("생성된_보험_특약", "txt")
+                            st.success("✅ 예약된 특약 동적 생성 완료!")
+                        else:
+                            st.warning("⚠️ 새로 생성된 보고서 내용이 없어 특약 생성을 건너뜁니다. 보고서 생성에 문제가 없는지 확인해주세요.")
+                            # 보고서가 생성되지 않았다면 특약도 생성할 수 없으므로, 기존 특약 사용 로직은 제거
+                            endorsement_text_for_attachment = None # 특약 내용 없음을 명확히
+                            endorsement_filename = None
+
+                        # --- 9. 이메일 전송 ---
                         recipient_emails_list = [e.strip() for e in scheduled_task['recipient_emails'].split(',') if e.strip()]
                         
-                        # 특약 정보 가져오기 (데이터베이스에서 불러오도록 변경)
-                        endorsement_text_for_attachment = database_manager.get_latest_generated_endorsement()
-                        endorsement_filename = None
-                        if endorsement_text_for_attachment:
-                            endorsement_filename = data_exporter.generate_filename("생성된_보험_특약", "txt")
-
-                        # --- 자동 예약 전송 로직 변경: 보고서와 특약을 각각 다른 이메일로 전송 ---
                         report_send_success = False
                         endorsement_send_success = False
 
-                        # 8-1. 보고서 이메일 전송
+                        # 9-1. 보고서 이메일 전송
                         if recipient_emails_list:
                             email_subject_report = f"예약된 뉴스 트렌드 분석 보고서 - {datetime.now().strftime('%Y%m%d')}"
                             report_body_for_email = final_prettified_report # 본문은 보고서 내용으로 유지
@@ -322,7 +358,7 @@ def report_automation_page():
                             st.warning("⚠️ 예약된 작업에 유효한 수신자 이메일이 없어 보고서 이메일 전송을 건너뜁니다.")
                             print("WARNING: No valid recipients for scheduled report email.")
 
-                        # 8-2. 특약 이메일 전송
+                        # 9-2. 특약 이메일 전송
                         if recipient_emails_list:
                             email_subject_endorsement = f"예약된 보험 특약 - {datetime.now().strftime('%Y%m%d')}"
                             
@@ -509,8 +545,6 @@ def report_automation_page():
         with col_manual_send_main: # 수동 전송 섹션을 오른쪽 컬럼으로 이동
             st.subheader("현재 예약된 작업")
             # 자동 전송 모드 버튼과 상태 메시지
-            # 원상 복구: 컨테이너 제거
-            # with st.container(border=True): # 제거
             col_auto_toggle_btn, col_auto_toggle_status = st.columns([0.4, 0.6])
             with col_auto_toggle_btn:
                 if st.session_state['auto_refresh_on']:
@@ -806,7 +840,7 @@ def report_automation_page():
                                 else:
                                     st.session_state['manual_email_status_message'] = "특약 이메일 전송에 실패했습니다. 설정 및 로그를 확인해주세요."
                                     st.session_state['manual_email_status_type'] = "error"
-                                st.rerun()
+                            st.rerun()
 
     # 수동 이메일 전송 상태 메시지 표시
     if st.session_state['manual_email_status_message']:
@@ -847,6 +881,7 @@ def report_automation_page():
             st.session_state['email_status_type'] = ""
             st.session_state['search_profiles'] = database_manager.get_search_profiles()
             st.session_state['scheduled_task'] = database_manager.get_scheduled_task()
+            # 데이터베이스 초기화 시 특약 및 문서 텍스트도 초기화
             database_manager.save_generated_endorsement("")
+            database_manager.save_document_text("") # 문서 텍스트도 초기화 (새로 추가)
             st.rerun()
-
