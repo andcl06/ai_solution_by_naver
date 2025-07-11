@@ -36,7 +36,8 @@ def document_analysis_page():
         if st.button("⏰ 자동화"):
             st.session_state.page = "automation"
             st.rerun()
-        st.markdown("---")
+
+    st.markdown("---")
 
     # Potens API 키 로드 (main_app.py에서 로드된 것을 사용)
     POTENS_API_KEY = os.getenv("POTENS_API_KEY")
